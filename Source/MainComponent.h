@@ -2,6 +2,7 @@
 
 #include "Common.h"
 #include "ArrangementView.h"
+#include "MixerView.h"
 #include "PianoRoll.h"
 #include "TransportBar.h"
 
@@ -24,12 +25,16 @@ public:
     static constexpr const char* projectSuffix = ".tracktionedit";
 
 private:
-    enum MenuIDs { newProject = 1, openProject, saveProject, saveProjectAs, importAudio, undo, redo };
+    enum MenuIDs { newProject = 1, openProject, saveProject, saveProjectAs, importAudio, exportAudio, undo, redo,
+                   addAudioTrack, addInstrumentTrack, deleteTrack, toggleAutomation,
+                   toggleMixer, toggleLoop, toggleClick };
 
     // Project handling
     void setEdit (std::unique_ptr<te::Edit>, const juce::File& file);
     void buildViews();
     void setPianoRollVisible (bool);
+    void setMixerVisible (bool);
+    void exportAudioFromChooser();
     void newEmptyProject();
     void openProjectFile (const juce::File&);
     void chooseAndOpenProject();
@@ -55,6 +60,8 @@ private:
     std::unique_ptr<TransportBar> transportBar;
     std::unique_ptr<ArrangementView> arrangement;
     std::unique_ptr<PianoRoll> pianoRoll;
+    std::unique_ptr<MixerView> mixer;
+    bool mixerVisible = false;
     std::unique_ptr<juce::FileChooser> fileChooser;
     juce::String lastTitle;
 

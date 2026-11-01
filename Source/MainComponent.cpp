@@ -63,6 +63,25 @@ MainComponent::MainComponent()
         arrangement->onOpenMidiClip (clip->itemID);
     }
 
+    // --demo-mixer: open the mixer, tweak some strips and draw volume automation on track 1
+    if (args.contains ("--demo-mixer"))
+    {
+        auto tracks = te::getAudioTracks (*edit);
+        tracks[0]->getVolumePlugin()->setSliderPos (te::decibelsToVolumeFaderPosition (-6.0f));
+        tracks[1]->getVolumePlugin()->setPan (-0.6f);
+        tracks[2]->setMute (true);
+        tracks[3]->setSolo (true);
+
+        auto& curve = tracks[0]->getVolumePlugin()->volParam->getCurve();
+        curve.addPoint (te::TimePosition::fromSeconds (0.0), 0.3f, 0.0f, nullptr);
+        curve.addPoint (te::TimePosition::fromSeconds (4.0), 0.8f, 0.0f, nullptr);
+        curve.addPoint (te::TimePosition::fromSeconds (8.0), 0.5f, 0.0f, nullptr);
+
+        arrangement->selectTrackIndex (0);
+        arrangement->toggleAutomationOnSelectedTrack();
+        setMixerVisible (true);
+    }
+
     // --snapshot <file.png>: render the window to an image once thumbnails are ready, then quit.
     // Handy for visual checks and CI without touching the screen.
     const int snapIndex = args.indexOf ("--snapshot");
@@ -89,6 +108,7 @@ MainComponent::~MainComponent()
 
     edit->getTransport().stop (false, false);
     pianoRoll = nullptr;
+    mixer = nullptr;
     arrangement = nullptr;
     transportBar = nullptr;
     edit = nullptr;
@@ -103,6 +123,9 @@ void MainComponent::resized()
 {
     auto r = getLocalBounds();
     transportBar->setBounds (r.removeFromTop (44));
+
+    if (mixer->isVisible())
+        mixer->setBounds (r.removeFromBottom (juce::jmin (260, r.getHeight() / 2)));
 
     if (pianoRoll->isVisible())
         pianoRoll->setBounds (r.removeFromBottom (juce::jmin (320, r.getHeight() / 2)));
@@ -120,6 +143,7 @@ void MainComponent::setEdit (std::unique_ptr<te::Edit> newEdit, const juce::File
 
     // Views reference the edit, so they have to go before it does
     pianoRoll = nullptr;
+    mixer = nullptr;
     arrangement = nullptr;
     transportBar = nullptr;
 
@@ -149,6 +173,8 @@ void MainComponent::buildViews()
     arrangement = std::make_unique<ArrangementView> (*edit);
 
     pianoRoll = std::make_unique<PianoRoll> (*edit);
+    mixer = std::make_unique<MixerView> (*edit);
+    transportBar->onToggleMixer = [this] { setMixerVisible (! mixerVisible); };
     arrangement->onOpenMidiClip = [this] (te::EditItemID id)
     {
         pianoRoll->setClip (id);
@@ -158,7 +184,50 @@ void MainComponent::buildViews()
     addAndMakeVisible (*transportBar);
     addAndMakeVisible (*arrangement);
     addChildComponent (*pianoRoll);
+    addChildComponent (*mixer);
+    mixer->setVisible (mixerVisible);
+    transportBar->setMixerShown (mixerVisible);
     resized();
+}
+
+void MainComponent::setMixerVisible (bool shouldBeVisible)
+{
+    mixerVisible = shouldBeVisible;
+    mixer->setVisible (shouldBeVisible);
+    transportBar->setMixerShown (shouldBeVisible);
+    resized();
+}
+
+void MainComponent::exportAudioFromChooser()
+{
+    fileChooser = std::make_unique<juce::FileChooser> ("Export audio (WAV)",
+                                                       juce::File::getSpecialLocation (juce::File::userMusicDirectory).getChildFile (getProjectName() + ".wav"),
+                                                       "*.wav");
+
+    fileChooser->launchAsync (juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::canSelectFiles
+                                  | juce::FileBrowserComponent::warnAboutOverwriting,
+                              [this] (const juce::FileChooser& fc)
+                              {
+                                  auto f = fc.getResult();
+                                  if (f == juce::File())
+                                      return;
+
+                                  f = f.withFileExtension ("wav");
+                                  edit->getTransport().stop (false, false);
+
+                                  // Render the arrangement from bar 1 to the end of the last clip (plus a short tail)
+                                  auto end = edit->getLength() + te::TimeDuration::fromSeconds (2.0);
+                                  juce::BigInteger tracks;
+                                  tracks.setRange (0, te::getAllTracks (*edit).size(), true);
+
+                                  const bool ok = te::Renderer::renderToFile ("Export", f, *edit, { 0_tp, te::TimePosition() + end },
+                                                                              tracks, true, false, {}, false);
+
+                                  juce::AlertWindow::showMessageBoxAsync (ok ? juce::MessageBoxIconType::InfoIcon
+                                                                             : juce::MessageBoxIconType::WarningIcon,
+                                                                          "Export", ok ? "Exported " + f.getFileName()
+                                                                                       : "Export failed.");
+                              });
 }
 
 void MainComponent::setPianoRollVisible (bool shouldBeVisible)
@@ -372,7 +441,7 @@ void MainComponent::timerCallback()
 
 juce::StringArray MainComponent::getMenuBarNames()
 {
-    return { "File", "Edit" };
+    return { "File", "Edit", "Track", "View" };
 }
 
 juce::PopupMenu MainComponent::getMenuForIndex (int index, const juce::String&)
@@ -396,11 +465,26 @@ juce::PopupMenu MainComponent::getMenuForIndex (int index, const juce::String&)
         add (saveProjectAs, "Save As...",        "shift + cmd + S");
         m.addSeparator();
         add (importAudio,   "Import Audio...",   "cmd + I");
+        add (exportAudio,   "Export Audio...",   "shift + cmd + E");
     }
-    else
+    else if (index == 1)
     {
         add (undo, "Undo", "cmd + Z");
         add (redo, "Redo", "shift + cmd + Z");
+    }
+    else if (index == 2)
+    {
+        add (addAudioTrack,      "Add Audio Track",       "cmd + T");
+        add (addInstrumentTrack, "Add Instrument Track",  "shift + cmd + T");
+        add (deleteTrack,        "Delete Selected Track", "");
+        m.addSeparator();
+        add (toggleAutomation,   "Show/Hide Automation",  "cmd + A");
+    }
+    else
+    {
+        add (toggleMixer, "Show/Hide Mixer",   "cmd + M");
+        add (toggleLoop,  "Loop",              "cmd + L");
+        add (toggleClick, "Metronome",         "cmd + K");
     }
 
     return m;
@@ -415,6 +499,21 @@ void MainComponent::menuItemSelected (int id, int)
         case saveProject:    saveCurrentProject(); break;
         case saveProjectAs:  saveProjectAsFromChooser(); break;
         case importAudio:    addAudioFileFromChooser(); break;
+        case exportAudio:    exportAudioFromChooser(); break;
+        case addAudioTrack:  arrangement->addTrack (false); break;
+        case addInstrumentTrack: arrangement->addTrack (true); break;
+        case deleteTrack:    arrangement->deleteSelectedTrack(); break;
+        case toggleAutomation: arrangement->toggleAutomationOnSelectedTrack(); break;
+        case toggleMixer:    setMixerVisible (! mixerVisible); break;
+        case toggleLoop:
+        {
+            auto& t = edit->getTransport();
+            t.looping = ! t.looping.get();
+            if (t.looping && t.getLoopRange().getLength().inSeconds() <= 0.0)
+                t.setLoopRange ({ 0_tp, edit->tempoSequence.toTime (te::BeatPosition::fromBeats (16.0)) });
+            break;
+        }
+        case toggleClick:    edit->clickTrackEnabled = ! edit->clickTrackEnabled.get(); break;
         case undo:           edit->undo(); break;
         case redo:           edit->redo(); break;
         default:             break;
@@ -455,6 +554,13 @@ bool MainComponent::keyPressed (const juce::KeyPress& key)
         { { 's', cmd, 0 },         saveProject },
         { { 's', cmd | shift, 0 }, saveProjectAs },
         { { 'i', cmd, 0 },         importAudio },
+        { { 'e', cmd | shift, 0 }, exportAudio },
+        { { 't', cmd, 0 },         addAudioTrack },
+        { { 't', cmd | shift, 0 }, addInstrumentTrack },
+        { { 'a', cmd, 0 },         toggleAutomation },
+        { { 'm', cmd, 0 },         toggleMixer },
+        { { 'l', cmd, 0 },         toggleLoop },
+        { { 'k', cmd, 0 },         toggleClick },
         { { 'z', cmd, 0 },         undo },
         { { 'z', cmd | shift, 0 }, redo },
     };

@@ -30,11 +30,21 @@ Optional args: a `.tracktionedit` project to open, audio files (placed on consec
 | Zoom | Pinch, Cmd+scroll, Cmd+= / Cmd+- |
 | Scroll | Trackpad / wheel (Shift = horizontal) |
 | Locate | Click/drag in ruler |
+| Set loop range | Shift+drag in ruler; toggle with Loop button / Cmd+L |
+| Metronome | Click button / Cmd+K |
+| Tempo | Double-click the BPM readout and type |
+| Mixer (volume, pan, M/S, meters, master) | Mixer button / Cmd+M |
+| Add audio / instrument track | Cmd+T / Shift+Cmd+T, or right-click a track header |
+| Rename / delete track | Double-click name / right-click header (or Track menu) |
+| Mute / solo | M / S buttons in header or mixer |
+| Automation (volume / pan) | A button in header (Cmd+A), Vol/Pan toggles parameter; click adds a point, drag moves, Alt-click or right-click deletes |
+| Export WAV | Shift+Cmd+E |
 
 ## Layout
 
 - `Source/MainComponent` — owns `te::Engine` + `te::Edit`, global key commands
 - `Source/TransportBar` — transport buttons, bars.beats / time / tempo / CPU readouts
+- `Source/MixerView` — channel strips, master, level meters
 - `Source/ArrangementView` — the timeline; paints everything in one component (no per-clip components) in musical time via the tempo sequence
 
 ## Licensing

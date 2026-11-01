@@ -32,7 +32,8 @@ target_sources(Arranger PRIVATE
     Source/MainComponent.cpp
     Source/ArrangementView.cpp
     Source/PianoRoll.cpp
-    Source/TransportBar.cpp)
+    Source/TransportBar.cpp
+    Source/MixerView.cpp)
 
 target_include_directories(Arranger PRIVATE Source)
 

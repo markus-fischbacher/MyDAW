@@ -20,6 +20,13 @@ public:
 
     void insertAudioFile (const juce::File&, int trackIndex, te::TimePosition start);
 
+    /** Appends a track; instrument tracks get a synth so MIDI clips are audible. */
+    void addTrack (bool instrument);
+    void deleteSelectedTrack();
+    bool hasSelectedTrack() const           { return getSelectedTrack() != nullptr; }
+    void toggleAutomationOnSelectedTrack();
+    void selectTrackIndex (int index);
+
     /** Called when a MIDI clip should be opened for editing (double-click, or just created). */
     std::function<void (te::EditItemID)> onOpenMidiClip;
 
@@ -38,7 +45,7 @@ public:
     void filesDropped (const juce::StringArray&, int x, int y) override;
 
 private:
-    enum class DragMode { none, scrub, move, trimStart, trimEnd };
+    enum class DragMode { none, scrub, move, trimStart, trimEnd, automation, loopRange };
 
     struct ClipHit
     {
@@ -66,6 +73,23 @@ private:
 
     ClipHit hitTestClip (juce::Point<int>) const;
     te::Clip* getSelectedClip() const;
+    te::AudioTrack* getSelectedTrack() const;
+
+    // Track headers
+    enum class HeaderButton { none, mute, solo, automation, param };
+    juce::Rectangle<int> headerButtonRect (int trackIndex, HeaderButton) const;
+    HeaderButton hitTestHeaderButton (juce::Point<int>, int trackIndex) const;
+    void headerClicked (const juce::MouseEvent&);
+    void showTrackMenu (int trackIndex);
+    void beginRename (int trackIndex);
+
+    // Automation (volume / pan breakpoints, edited directly in the lane)
+    te::AutomatableParameter* getAutoParam (te::AudioTrack&) const;
+    float autoValueToY (te::AutomatableParameter&, float value, int trackIndex) const;
+    float autoYToValue (te::AutomatableParameter&, int y, int trackIndex) const;
+    int hitTestAutoPoint (te::AutomatableParameter&, int trackIndex, juce::Point<int>) const;
+    void paintAutomation (juce::Graphics&, te::AudioTrack&, int trackIndex);
+    void automationMouseDown (const juce::MouseEvent&, te::AudioTrack&, int trackIndex);
 
     void paintGrid (juce::Graphics&, juce::Rectangle<int> lanes);
     void paintClips (juce::Graphics&, juce::Rectangle<int> lanes);
@@ -92,7 +116,14 @@ private:
     int scrollY = 0;
     int lastPlayheadX = -1;
 
-    te::EditItemID selectedClipID;
+    te::EditItemID selectedClipID, selectedTrackID;
+    std::set<te::EditItemID> automationTracks;
+    std::map<te::EditItemID, int> automationParam;      // 0 = volume (default), 1 = pan
+    int dragAutoIndex = -1;
+    double loopAnchorBeat = 0.0;
+    te::EditItemID dragAutoTrack;
+    juce::TextEditor renameEditor;
+    te::EditItemID renameTrackID;
     std::map<te::EditItemID, std::unique_ptr<te::SmartThumbnail>> thumbnails;
 
     // Drag state

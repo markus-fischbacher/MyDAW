@@ -14,7 +14,8 @@ public:
     void paint (juce::Graphics&) override;
     void resized() override;
 
-    std::function<void()> onAddFile, onShowSettings;
+    std::function<void()> onAddFile, onShowSettings, onToggleMixer;
+    void setMixerShown (bool b) { mixerButton.setToggleState (b, juce::dontSendNotification); }
 
 private:
     void changeListenerCallback (juce::ChangeBroadcaster*) override;
@@ -24,7 +25,8 @@ private:
     te::Edit& edit;
 
     juce::TextButton playButton { "Play" }, stopButton { "Stop" },
-                     addFileButton { "Add Audio..." }, settingsButton { "Audio Settings" };
+                     addFileButton { "Add Audio..." }, settingsButton { "Audio Settings" },
+                     loopButton { "Loop" }, clickButton { "Click" }, mixerButton { "Mixer" };
     juce::Label positionLabel, timeLabel, tempoLabel, cpuLabel;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (TransportBar)

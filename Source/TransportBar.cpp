@@ -30,6 +30,30 @@ TransportBar::TransportBar (te::Edit& e)
     addFileButton.onClick  = [this] { if (onAddFile) onAddFile(); };
     settingsButton.onClick = [this] { if (onShowSettings) onShowSettings(); };
 
+    for (auto* b : { &loopButton, &clickButton, &mixerButton })
+        b->setClickingTogglesState (true);
+
+    loopButton.setToggleState (transport.looping.get(), juce::dontSendNotification);
+    clickButton.setToggleState (edit.clickTrackEnabled.get(), juce::dontSendNotification);
+    loopButton.onClick = [this]
+    {
+        auto& t = edit.getTransport();
+        t.looping = loopButton.getToggleState();
+
+        if (t.looping && t.getLoopRange().getLength().inSeconds() <= 0.0)
+            t.setLoopRange ({ 0_tp, edit.tempoSequence.toTime (te::BeatPosition::fromBeats (16.0)) });
+    };
+    clickButton.onClick = [this] { edit.clickTrackEnabled = clickButton.getToggleState(); };
+    mixerButton.onClick = [this] { if (onToggleMixer) onToggleMixer(); };
+
+    tempoLabel.setEditable (false, true, false);
+    tempoLabel.onTextChange = [this]
+    {
+        auto bpm = juce::jlimit (20.0, 400.0, tempoLabel.getText().getDoubleValue());
+        edit.getUndoManager().beginNewTransaction();
+        edit.tempoSequence.getTempo (0)->setBpm (bpm);
+    };
+
     for (auto* l : { &positionLabel, &timeLabel, &tempoLabel, &cpuLabel })
     {
         l->setColour (juce::Label::textColourId, Palette::text);
@@ -40,7 +64,7 @@ TransportBar::TransportBar (te::Edit& e)
     positionLabel.setFont (juce::FontOptions (20.0f, juce::Font::bold));
     cpuLabel.setColour (juce::Label::textColourId, Palette::textDim);
 
-    for (auto* b : { &playButton, &stopButton, &addFileButton, &settingsButton })
+    for (auto* b : { &playButton, &stopButton, &addFileButton, &settingsButton, &loopButton, &clickButton, &mixerButton })
     {
         b->setWantsKeyboardFocus (false);
         addAndMakeVisible (*b);
@@ -73,6 +97,12 @@ void TransportBar::resized()
     positionLabel.setBounds (r.removeFromLeft (130));
     timeLabel.setBounds (r.removeFromLeft (110));
     tempoLabel.setBounds (r.removeFromLeft (110));
+    r.removeFromLeft (8);
+    loopButton.setBounds (r.removeFromLeft (60));
+    r.removeFromLeft (4);
+    clickButton.setBounds (r.removeFromLeft (60));
+    r.removeFromLeft (4);
+    mixerButton.setBounds (r.removeFromLeft (64));
 
     settingsButton.setBounds (r.removeFromRight (120));
     r.removeFromRight (4);
@@ -108,7 +138,10 @@ void TransportBar::timerCallback()
     timeLabel.setText (juce::String::formatted ("%d:%06.3f", (int) secs / 60, std::fmod (secs, 60.0)),
                        juce::dontSendNotification);
 
-    tempoLabel.setText (juce::String (edit.tempoSequence.getBpmAt (pos), 2) + " BPM", juce::dontSendNotification);
+    if (! tempoLabel.isBeingEdited())
+        tempoLabel.setText (juce::String (edit.tempoSequence.getBpmAt (pos), 2), juce::dontSendNotification);
+    loopButton.setToggleState (edit.getTransport().looping.get(), juce::dontSendNotification);
+    clickButton.setToggleState (edit.clickTrackEnabled.get(), juce::dontSendNotification);
     cpuLabel.setText ("CPU " + juce::String (juce::roundToInt (edit.engine.getDeviceManager().getCpuUsage() * 100.0)) + "%",
                       juce::dontSendNotification);
 }
