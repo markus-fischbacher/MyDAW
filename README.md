@@ -37,7 +37,7 @@ Optional args: a `.tracktionedit` project to open, audio files (placed on consec
 
 ## Licensing
 
-tracktion_engine is GPL/commercial, JUCE is AGPL/commercial. A closed-source release needs commercial licences for both.
+Arranger is licensed under the GNU Affero General Public License v3.0, see [LICENSE](LICENSE). This follows from the libraries it builds on (JUCE: AGPL-3.0, tracktion_engine: GPL-3.0-or-later); see [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md). A closed-source release would need commercial licences for both.
 
 ## Projects
 
