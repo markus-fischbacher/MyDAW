@@ -14,6 +14,17 @@ ArrangementView::~ArrangementView()
     editState.removeListener (this);
 }
 
+// MIDI clips need an instrument on their track to be audible; add a synth if there is none
+static void ensureInstrument (te::AudioTrack& track)
+{
+    for (auto* plugin : track.pluginList)
+        if (plugin->isSynth())
+            return;
+
+    if (auto plugin = track.edit.getPluginCache().createNewPlugin (te::FourOscPlugin::xmlTypeName, {}))
+        track.pluginList.insertPlugin (plugin, 0, nullptr);
+}
+
 //==============================================================================
 // Coordinate mapping
 
@@ -204,7 +215,8 @@ void ArrangementView::paintClips (juce::Graphics& g, juce::Rectangle<int> lanes)
 void ArrangementView::paintClip (juce::Graphics& g, te::Clip& clip, juce::Rectangle<int> b)
 {
     const bool selected = clip.itemID == selectedClipID;
-    const auto colour = Palette::clip;
+    auto* midi = dynamic_cast<te::MidiClip*> (&clip);
+    const auto colour = midi != nullptr ? Palette::midiClip : Palette::clip;
 
     g.setColour (colour.withAlpha (0.35f));
     g.fillRoundedRectangle (b.toFloat(), 3.0f);
@@ -217,7 +229,38 @@ void ArrangementView::paintClip (juce::Graphics& g, te::Clip& clip, juce::Rectan
     g.setFont (juce::FontOptions (11.5f));
     g.drawText (clip.getName(), header.reduced (5, 0), juce::Justification::centredLeft, true);
 
-    if (auto* wave = dynamic_cast<te::WaveAudioClip*> (&clip))
+    if (midi != nullptr)
+    {
+        auto& notes = midi->getSequence().getNotes();
+
+        if (! notes.isEmpty())
+        {
+            int lo = 127, hi = 0;
+
+            for (auto* n : notes)
+            {
+                lo = juce::jmin (lo, n->getNoteNumber());
+                hi = juce::jmax (hi, n->getNoteNumber());
+            }
+
+            // Notes are clip-relative beats; clip start converted once
+            const auto startBeat = timeToBeat (clip.getPosition().getStart());
+            auto body = b.withTrimmedTop (clipHeaderHeight).reduced (0, 4);
+            const float rowH = juce::jmin (6.0f, (float) body.getHeight() / (float) (hi - lo + 1));
+
+            g.setColour (colour.brighter (0.6f));
+
+            for (auto* n : notes)
+            {
+                const auto x1 = (float) beatToX (startBeat + n->getStartBeat().inBeats());
+                const auto x2 = (float) beatToX (startBeat + n->getEndBeat().inBeats());
+                const auto y = (float) body.getBottom() - (float) (n->getNoteNumber() - lo + 1) * rowH;
+                g.fillRect (juce::Rectangle<float> (x1, y, juce::jmax (1.5f, x2 - x1), juce::jmax (1.5f, rowH - 1.0f))
+                                .getIntersection (b.toFloat()));
+            }
+        }
+    }
+    else if (auto* wave = dynamic_cast<te::WaveAudioClip*> (&clip))
     {
         if (auto* thumb = getThumbnailFor (*wave))
         {
@@ -452,7 +495,12 @@ void ArrangementView::mouseDrag (const juce::MouseEvent& e)
 
             if (juce::isPositiveAndBelow (targetIndex, tracks.size())
                  && tracks[targetIndex] != clip->getTrack())
+            {
+                if (dynamic_cast<te::MidiClip*> (clip) != nullptr)
+                    ensureInstrument (*tracks[targetIndex]);
+
                 clip->moveTo (*tracks[targetIndex]);
+            }
 
             break;
         }
@@ -481,6 +529,44 @@ void ArrangementView::mouseUp (const juce::MouseEvent&)
 {
     dragMode = DragMode::none;
     dragClipID = {};
+}
+
+void ArrangementView::mouseDoubleClick (const juce::MouseEvent& e)
+{
+    if (e.y < rulerHeight || e.x < headerWidth)
+        return;
+
+    const auto hit = hitTestClip (e.getPosition());
+
+    if (hit.clip != nullptr)
+    {
+        if (dynamic_cast<te::MidiClip*> (hit.clip) != nullptr && onOpenMidiClip)
+            onOpenMidiClip (hit.clip->itemID);
+
+        return;
+    }
+
+    // Empty lane: create a one-bar MIDI clip at the clicked (snapped) position
+    const auto tracks = te::getAudioTracks (edit);
+    const int index = yToTrackIndex (e.y);
+
+    if (! juce::isPositiveAndBelow (index, tracks.size()))
+        return;
+
+    const auto startBeat = juce::jmax (0.0, std::floor (xToBeat (e.x) / 4.0) * 4.0);
+    const te::TimeRange range (beatToTime (startBeat), beatToTime (startBeat + 4.0));
+
+    edit.getUndoManager().beginNewTransaction();
+    ensureInstrument (*tracks[index]);
+
+    if (auto clip = tracks[index]->insertMIDIClip ("MIDI", range, nullptr))
+    {
+        selectedClipID = clip->itemID;
+        repaint();
+
+        if (onOpenMidiClip)
+            onOpenMidiClip (clip->itemID);
+    }
 }
 
 void ArrangementView::mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheelDetails& w)

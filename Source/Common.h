@@ -19,4 +19,5 @@ namespace Palette
     const juce::Colour accent       { 0xffffa53a };
     const juce::Colour playhead     { 0xffff5a4f };
     const juce::Colour clip         { 0xff4f8fd8 };
+    const juce::Colour midiClip     { 0xff58b368 };
 }

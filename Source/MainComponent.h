@@ -2,6 +2,7 @@
 
 #include "Common.h"
 #include "ArrangementView.h"
+#include "PianoRoll.h"
 #include "TransportBar.h"
 
 // Owns the engine and the current project (te::Edit), and the File menu commands.
@@ -28,6 +29,7 @@ private:
     // Project handling
     void setEdit (std::unique_ptr<te::Edit>, const juce::File& file);
     void buildViews();
+    void setPianoRollVisible (bool);
     void newEmptyProject();
     void openProjectFile (const juce::File&);
     void chooseAndOpenProject();
@@ -52,6 +54,7 @@ private:
 
     std::unique_ptr<TransportBar> transportBar;
     std::unique_ptr<ArrangementView> arrangement;
+    std::unique_ptr<PianoRoll> pianoRoll;
     std::unique_ptr<juce::FileChooser> fileChooser;
     juce::String lastTitle;
 

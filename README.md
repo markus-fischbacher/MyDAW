@@ -10,7 +10,7 @@ cmake --build build
 open build/Arranger_artefacts/Debug/Arranger.app
 ```
 
-Optional args: a `.tracktionedit` project to open, audio files (placed on consecutive tracks at bar 1), `--snapshot out.png` (renders the window to PNG and quits) and `--save-and-quit out.tracktionedit` (saves the project and quits, for scripted checks).
+Optional args: a `.tracktionedit` project to open, audio files (placed on consecutive tracks at bar 1), `--demo-midi` (adds an example MIDI clip), `--snapshot out.png` (renders the window to PNG and quits) and `--save-and-quit out.tracktionedit` (saves the project and quits, for scripted checks).
 
 ## Controls
 
@@ -21,6 +21,8 @@ Optional args: a `.tracktionedit` project to open, audio files (placed on consec
 | New / Open / Save / Save As | Cmd+N / Cmd+O / Cmd+S / Shift+Cmd+S (File menu) |
 | Import audio | Drag files onto a lane, or Cmd+I |
 | Move clip | Drag body (across tracks too), snaps to grid; hold Alt to bypass snap |
+| Create MIDI clip | Double-click an empty lane (adds a synth to the track if it has none) |
+| Edit MIDI clip | Double-click it; piano roll opens below (click: add note, drag: move/resize, right-click or Delete: remove, Esc: close) |
 | Trim clip | Drag left/right edge |
 | Split at playhead | Cmd+E |
 | Delete clip | Backspace / Delete |

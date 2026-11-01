@@ -47,6 +47,22 @@ MainComponent::MainComponent()
         });
     }
 
+    // --demo-midi: add a MIDI clip with an arpeggio on track 4 and open it in the piano roll
+    if (args.contains ("--demo-midi"))
+    {
+        auto* track = te::getAudioTracks (*edit)[3];
+        auto clip = track->insertMIDIClip ("Arp", { 0_tp, 8_tp }, nullptr);
+
+        for (int i = 0; i < 16; ++i)
+        {
+            const int pitches[] = { 57, 60, 64, 67 };
+            clip->getSequence().addNote (pitches[i % 4] + (i / 8) * 5, te::BeatPosition::fromBeats (i * 0.5),
+                                         te::BeatDuration::fromBeats (0.5), 90, 0, nullptr);
+        }
+
+        arrangement->onOpenMidiClip (clip->itemID);
+    }
+
     // --snapshot <file.png>: render the window to an image once thumbnails are ready, then quit.
     // Handy for visual checks and CI without touching the screen.
     const int snapIndex = args.indexOf ("--snapshot");
@@ -72,6 +88,7 @@ MainComponent::~MainComponent()
    #endif
 
     edit->getTransport().stop (false, false);
+    pianoRoll = nullptr;
     arrangement = nullptr;
     transportBar = nullptr;
     edit = nullptr;
@@ -86,6 +103,10 @@ void MainComponent::resized()
 {
     auto r = getLocalBounds();
     transportBar->setBounds (r.removeFromTop (44));
+
+    if (pianoRoll->isVisible())
+        pianoRoll->setBounds (r.removeFromBottom (juce::jmin (320, r.getHeight() / 2)));
+
     arrangement->setBounds (r);
 }
 
@@ -98,6 +119,7 @@ void MainComponent::setEdit (std::unique_ptr<te::Edit> newEdit, const juce::File
         edit->getTransport().stop (false, false);
 
     // Views reference the edit, so they have to go before it does
+    pianoRoll = nullptr;
     arrangement = nullptr;
     transportBar = nullptr;
 
@@ -126,9 +148,26 @@ void MainComponent::buildViews()
 
     arrangement = std::make_unique<ArrangementView> (*edit);
 
+    pianoRoll = std::make_unique<PianoRoll> (*edit);
+    arrangement->onOpenMidiClip = [this] (te::EditItemID id)
+    {
+        pianoRoll->setClip (id);
+        setPianoRollVisible (true);
+    };
+
     addAndMakeVisible (*transportBar);
     addAndMakeVisible (*arrangement);
+    addChildComponent (*pianoRoll);
     resized();
+}
+
+void MainComponent::setPianoRollVisible (bool shouldBeVisible)
+{
+    pianoRoll->setVisible (shouldBeVisible);
+    resized();
+
+    if (shouldBeVisible)
+        pianoRoll->scrollToNotesOnShow();
 }
 
 void MainComponent::newEmptyProject()
@@ -428,6 +467,16 @@ bool MainComponent::keyPressed (const juce::KeyPress& key)
             return true;
         }
     }
+
+    if (key == juce::KeyPress::escapeKey && pianoRoll->isVisible())
+    {
+        setPianoRollVisible (false);
+        return true;
+    }
+
+    // Delete goes to a selected note first, otherwise to the selected clip
+    if (pianoRoll->isVisible() && pianoRoll->keyPressed (key))
+        return true;
 
     return arrangement->keyPressed (key);
 }

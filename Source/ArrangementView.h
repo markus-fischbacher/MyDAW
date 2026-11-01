@@ -20,6 +20,9 @@ public:
 
     void insertAudioFile (const juce::File&, int trackIndex, te::TimePosition start);
 
+    /** Called when a MIDI clip should be opened for editing (double-click, or just created). */
+    std::function<void (te::EditItemID)> onOpenMidiClip;
+
     void paint (juce::Graphics&) override;
     bool keyPressed (const juce::KeyPress&) override;
 
@@ -27,6 +30,7 @@ public:
     void mouseDown (const juce::MouseEvent&) override;
     void mouseDrag (const juce::MouseEvent&) override;
     void mouseUp (const juce::MouseEvent&) override;
+    void mouseDoubleClick (const juce::MouseEvent&) override;
     void mouseWheelMove (const juce::MouseEvent&, const juce::MouseWheelDetails&) override;
     void mouseMagnify (const juce::MouseEvent&, float scaleFactor) override;
 
