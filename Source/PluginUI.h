@@ -11,6 +11,9 @@ namespace PluginUI
     /** Popup for a track's plug-in chain: open/bypass/remove existing plug-ins, add effects or instruments, scan. */
     void showTrackMenu (te::Engine&, te::AudioTrack&);
 
+    /** Same for the master chain (effects only). */
+    void showMasterMenu (te::Engine&, te::Edit&);
+
     void openEditor (te::Plugin&);
 
     /** Closes every plug-in window; call before the Edit is destroyed. */

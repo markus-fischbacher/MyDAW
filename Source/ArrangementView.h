@@ -70,6 +70,10 @@ private:
     juce::Rectangle<int> getClipBounds (te::Clip&, int trackIndex) const;
     juce::Rectangle<int> getLanesArea() const;
 
+    double barToBeat (int bar) const;
+    int beatToBar (double beat) const;
+    void showRulerMenu (const juce::MouseEvent&);
+
     double getGridBeats() const;
     double snapBeat (double beat, bool bypass) const;
     void zoomAround (double factor, float mouseX);

@@ -108,6 +108,13 @@ public:
             pan.onValueChange   = [this] { volume->setPan ((float) pan.getValue()); };
         }
 
+        fx.onClick = [this]
+        {
+            if (track != nullptr)   PluginUI::showTrackMenu (edit.engine, *track);
+            else                    PluginUI::showMasterMenu (edit.engine, edit);
+        };
+        addAndMakeVisible (fx);
+
         if (track != nullptr)
         {
             for (auto* b : { &mute, &solo })
@@ -119,8 +126,6 @@ public:
             solo.setColour (juce::TextButton::buttonOnColourId, juce::Colour (0xff3a8fd0));
             mute.setToggleState (track->isMuted (false), juce::dontSendNotification);
             solo.setToggleState (track->isSolo (false), juce::dontSendNotification);
-            fx.onClick = [this] { PluginUI::showTrackMenu (edit.engine, *track); };
-            addAndMakeVisible (fx);
             mute.onClick = [this] { track->setMute (mute.getToggleState()); };
             solo.onClick = [this] { track->setSolo (solo.getToggleState()); };
         }
@@ -155,10 +160,10 @@ public:
         r.removeFromTop (4);
         name.setBounds (r.removeFromTop (20));
         pan.setBounds (r.removeFromTop (22));
+        fx.setBounds (r.removeFromBottom (22).reduced (1));
+        r.removeFromBottom (2);
         if (track != nullptr)
         {
-            fx.setBounds (r.removeFromBottom (22).reduced (1));
-            r.removeFromBottom (2);
             auto row = r.removeFromBottom (24);
             mute.setBounds (row.removeFromLeft (row.getWidth() / 2).reduced (1));
             solo.setBounds (row.reduced (1));

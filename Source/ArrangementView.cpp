@@ -52,10 +52,20 @@ static void ensureInstrument (te::AudioTrack& track)
 
 double ArrangementView::beatToX (double beat) const       { return headerWidth + (beat - scrollBeats) * pixelsPerBeat; }
 double ArrangementView::xToBeat (double x) const          { return (x - headerWidth) / pixelsPerBeat + scrollBeats; }
+double ArrangementView::barToBeat (int bar) const
+{
+    return edit.tempoSequence.toBeats (te::tempo::BarsAndBeats { bar, te::BeatDuration() }).inBeats();
+}
+
+int ArrangementView::beatToBar (double beat) const
+{
+    return edit.tempoSequence.toBarsAndBeats (beatToTime (beat)).bars;
+}
+
 double ArrangementView::beatsPerBar() const
 {
-    auto& ts = edit.tempoSequence.getTimeSigAt (0_tp);
-    return juce::jmax (1.0, ts.numerator.get() * 4.0 / juce::jmax (1, ts.denominator.get()));
+    // The engine's beat is one numerator unit, so a bar is always `numerator` beats long
+    return juce::jmax (1.0, (double) edit.tempoSequence.getTimeSigAt (0_tp).numerator.get());
 }
 
 double ArrangementView::timeToBeat (te::TimePosition t) const { return edit.tempoSequence.toBeats (t).inBeats(); }
@@ -210,7 +220,7 @@ void ArrangementView::paintGrid (juce::Graphics& g, juce::Rectangle<int> lanes)
 
     for (auto beat = firstBeat; beat <= lastBeat; beat += gridBeats)
     {
-        const bool isBar = std::fmod (beat, beatsPerBar()) == 0.0;
+        const bool isBar = std::abs (barToBeat (beatToBar (beat + 1.0e-6)) - beat) < 1.0e-6;
         g.setColour (isBar ? Palette::gridBar : Palette::gridBeat);
         g.drawVerticalLine (juce::roundToInt (beatToX (beat)), (float) lanes.getY(), (float) lanes.getBottom());
     }
@@ -347,19 +357,30 @@ void ArrangementView::paintRuler (juce::Graphics& g)
         g.drawText (juce::String (tempo->getBpm(), 1), x + 3, ruler.getBottom() - 12, 50, 12, juce::Justification::centredLeft);
     }
 
+    for (int i = 1; i < edit.tempoSequence.getTimeSigs().size(); ++i)
+    {
+        auto* ts = edit.tempoSequence.getTimeSig (i);
+        const int x = (int) beatToX (ts->startBeatNumber.get().inBeats());
+        if (x < headerWidth)
+            continue;
+        g.setColour (Palette::text);
+        g.fillRect (x, ruler.getY() + 14, 2, 8);
+        g.drawText (ts->getStringTimeSig(), x + 3, ruler.getY() + 14, 40, 12, juce::Justification::centredLeft);
+    }
+
     // Bar numbers, thinned out as you zoom out
     int barStep = 1;
     while (barStep * beatsPerBar() * pixelsPerBeat < 40.0)
         barStep *= 2;
 
-    const int firstBar = juce::jmax (0, (int) std::floor (xToBeat (ruler.getX()) / beatsPerBar()));
-    const int lastBar = (int) std::ceil (xToBeat (ruler.getRight()) / beatsPerBar());
+    const int firstBar = juce::jmax (0, beatToBar (juce::jmax (0.0, xToBeat (ruler.getX()))));
+    const int lastBar = beatToBar (xToBeat (ruler.getRight())) + 1;
 
     g.setFont (juce::FontOptions (11.0f));
 
     for (int bar = firstBar - (firstBar % barStep); bar <= lastBar; bar += barStep)
     {
-        const auto x = juce::roundToInt (beatToX (bar * beatsPerBar()));
+        const auto x = juce::roundToInt (beatToX (barToBeat (bar)));
 
         if (x < ruler.getX())
             continue;
@@ -543,6 +564,35 @@ void ArrangementView::showTrackMenu (int trackIndex)
             case 4: deleteSelectedTrack(); break;
             default: break;
         }
+    });
+}
+
+void ArrangementView::showRulerMenu (const juce::MouseEvent& e)
+{
+    auto& seq = edit.tempoSequence;
+    int tempoIndex = -1, sigIndex = -1;
+
+    for (int i = 1; i < seq.getNumTempos(); ++i)
+        if (std::abs (timeToX (seq.getTempo (i)->getStartTime()) - e.x) <= 8.0)
+            tempoIndex = i;
+
+    for (int i = 1; i < seq.getTimeSigs().size(); ++i)
+        if (std::abs (beatToX (seq.getTimeSig (i)->startBeatNumber.get().inBeats()) - e.x) <= 8.0)
+            sigIndex = i;
+
+    if (tempoIndex < 0 && sigIndex < 0)
+        return;
+
+    juce::PopupMenu m;
+    if (tempoIndex >= 0) m.addItem (1, "Delete Tempo Change (" + juce::String (seq.getTempo (tempoIndex)->getBpm(), 1) + " BPM)");
+    if (sigIndex >= 0)   m.addItem (2, "Delete Time Signature Change (" + seq.getTimeSig (sigIndex)->getStringTimeSig() + ")");
+
+    m.showMenuAsync ({}, [this, tempoIndex, sigIndex] (int r)
+    {
+        edit.getUndoManager().beginNewTransaction();
+        if (r == 1)      edit.tempoSequence.removeTempo (tempoIndex, false);
+        else if (r == 2) edit.tempoSequence.removeTimeSig (sigIndex);
+        repaint();
     });
 }
 
@@ -889,6 +939,12 @@ void ArrangementView::mouseDown (const juce::MouseEvent& e)
         }
     }
 
+    if (e.y < rulerHeight && e.x >= headerWidth && e.mods.isPopupMenu())
+    {
+        showRulerMenu (e);
+        return;
+    }
+
     if (e.y < rulerHeight && e.x >= headerWidth && e.mods.isShiftDown())
     {
         dragMode = DragMode::loopRange;
@@ -1056,8 +1112,8 @@ void ArrangementView::mouseDoubleClick (const juce::MouseEvent& e)
     if (! juce::isPositiveAndBelow (index, tracks.size()))
         return;
 
-    const auto startBeat = juce::jmax (0.0, std::floor (xToBeat (e.x) / beatsPerBar()) * beatsPerBar());
-    const te::TimeRange range (beatToTime (startBeat), beatToTime (startBeat + beatsPerBar()));
+    const int bar = juce::jmax (0, beatToBar (juce::jmax (0.0, xToBeat (e.x))));
+    const te::TimeRange range (beatToTime (barToBeat (bar)), beatToTime (barToBeat (bar + 1)));
 
     edit.getUndoManager().beginNewTransaction();
     ensureInstrument (*tracks[index]);

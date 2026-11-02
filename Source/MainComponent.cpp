@@ -105,6 +105,9 @@ MainComponent::MainComponent()
 
         edit->tempoSequence.getTimeSig (0)->setStringTimeSig ("3/4");
         edit->tempoSequence.insertTempo (te::BeatPosition::fromBeats (6.0), 90.0, 1.0f);
+        if (auto ts = edit->tempoSequence.insertTimeSig (te::BeatPosition::fromBeats (12.0)))
+            ts->setStringTimeSig ("7/8");
+        setMixerVisible (true);
         edit->recordingPunchInOut = true;
         edit->getTransport().setLoopRange ({ te::TimePosition::fromSeconds (2.0), te::TimePosition::fromSeconds (6.0) });
         edit->getTransport().looping = true;
@@ -530,6 +533,8 @@ juce::PopupMenu MainComponent::getMenuForIndex (int index, const juce::String&)
         add (insertTempo,   "Insert Tempo Change at Playhead...", "");
         add (resetTempoMap, "Remove Tempo Changes",                "");
         add (setTimeSig,    "Set Time Signature...",               "");
+        add (insertTimeSig, "Insert Time Signature Change at Playhead...", "");
+        add (masterPlugins, "Master Plug-ins...",                          "");
         m.addSeparator();
         add (togglePunch,   "Punch In/Out Recording",              "shift + cmd + P");
     }
@@ -605,6 +610,24 @@ void MainComponent::menuItemSelected (int id, int)
                             }
                         });
             break;
+        case insertTimeSig:
+        {
+            const auto bar = edit->tempoSequence.toBarsAndBeats (edit->getTransport().getPosition()).bars;
+            askForText ("Time signature change", "New time signature from bar " + juce::String (bar + 1) + " (e.g. 7/8):", "4/4",
+                        [this, bar] (juce::String text)
+                        {
+                            if (! text.containsChar ('/'))
+                                return;
+                            edit->getUndoManager().beginNewTransaction();
+                            auto start = edit->tempoSequence.toBeats (te::tempo::BarsAndBeats { bar, te::BeatDuration() });
+                            if (start.inBeats() <= 0.0)
+                                edit->tempoSequence.getTimeSig (0)->setStringTimeSig (text.trim());
+                            else if (auto ts = edit->tempoSequence.insertTimeSig (start))
+                                ts->setStringTimeSig (text.trim());
+                        });
+            break;
+        }
+        case masterPlugins:  PluginUI::showMasterMenu (engine, *edit); break;
         case togglePunch:
             edit->recordingPunchInOut = ! edit->recordingPunchInOut.get();
             if (edit->recordingPunchInOut.get() && edit->getTransport().getLoopRange().getLength().inSeconds() <= 0.0)

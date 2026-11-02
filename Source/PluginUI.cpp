@@ -40,6 +40,7 @@ namespace
                 slider.setSliderStyle (juce::Slider::LinearHorizontal);
                 slider.setTextBoxStyle (juce::Slider::TextBoxRight, false, 80, 20);
                 slider.setRange (0.0, 1.0, 0.0);
+                slider.onDragStart = [this] { param->getEdit().getUndoManager().beginNewTransaction(); };
                 slider.setValue (p.getCurrentNormalisedValue(), juce::dontSendNotification);
                 slider.textFromValueFunction = [this] (double v) { return param->valueToString (param->valueRange.convertFrom0to1 ((float) v)); };
                 slider.onValueChange = [this] { param->setNormalisedParameter ((float) slider.getValue(), juce::sendNotificationSync); };
@@ -160,10 +161,10 @@ namespace
         static inline std::unique_ptr<Scanner> instance;
     };
 
-    int findInsertIndex (te::AudioTrack& t)
+    int findInsertIndex (te::PluginList& list)
     {
         int i = 0;
-        for (auto* p : t.pluginList)
+        for (auto* p : list)
         {
             if (dynamic_cast<te::VolumeAndPanPlugin*> (p) != nullptr)
                 return i;
@@ -203,7 +204,19 @@ namespace PluginUI
         windows().clear();
     }
 
+    static void showChainMenu (te::Engine&, te::Edit&, te::PluginList&, bool allowInstruments);
+
     void showTrackMenu (te::Engine& engine, te::AudioTrack& track)
+    {
+        showChainMenu (engine, track.edit, track.pluginList, true);
+    }
+
+    void showMasterMenu (te::Engine& engine, te::Edit& edit)
+    {
+        showChainMenu (engine, edit, edit.getMasterPluginList(), false);
+    }
+
+    static void showChainMenu (te::Engine& engine, te::Edit& edit, te::PluginList& list, bool allowInstruments)
     {
         struct Builtin { const char* label; const char* type; };
         static const Builtin builtins[] =
@@ -216,7 +229,7 @@ namespace PluginUI
 
         auto types = engine.getPluginManager().knownPluginList.getTypes();
         auto chain = std::make_shared<juce::Array<te::Plugin::Ptr>>();
-        for (auto* p : track.pluginList)
+        for (auto* p : list)
             if (! isChainBasics (p))
                 chain->add (p);
 
@@ -248,24 +261,23 @@ namespace PluginUI
                                                                                     types[i].name + "  (" + types[i].manufacturerName + ")");
 
         menu.addSubMenu ("Add Effect", effects);
-        menu.addSubMenu ("Add Instrument", instruments, instruments.getNumItems() > 0);
+        if (allowInstruments)
+            menu.addSubMenu ("Add Instrument", instruments, instruments.getNumItems() > 0);
         menu.addSeparator();
         menu.addItem (scanID, "Scan for Plug-ins (AU / VST3)...");
 
-        te::AudioTrack::Ptr trackPtr (&track);
-        menu.showMenuAsync ({}, [&engine, trackPtr, chain, types, builtins = builtins] (int r)
+        menu.showMenuAsync ({}, [&engine, &edit, &list, chain, types, builtins = builtins] (int r)
         {
             if (r == 0)
                 return;
 
-            auto& edit = trackPtr->edit;
             edit.getUndoManager().beginNewTransaction();
 
             auto insert = [&] (te::Plugin::Ptr p, bool instrument)
             {
                 if (p == nullptr)
                     return;
-                trackPtr->pluginList.insertPlugin (p, instrument ? 0 : findInsertIndex (*trackPtr), nullptr);
+                list.insertPlugin (p, instrument ? 0 : findInsertIndex (list), nullptr);
                 openEditor (*p);
             };
 
