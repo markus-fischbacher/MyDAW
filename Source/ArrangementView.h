@@ -24,6 +24,7 @@ public:
     /** Appends a track; instrument tracks get a synth so MIDI clips are audible. */
     void addTrack (bool instrument);
     void addReturnTrack();
+    void zoomToFit();
     void deleteSelectedTrack();
     bool hasSelectedTrack() const           { return getSelectedTrack() != nullptr; }
     void toggleAutomationOnSelectedTrack();

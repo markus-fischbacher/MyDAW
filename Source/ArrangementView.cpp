@@ -1296,6 +1296,12 @@ bool ArrangementView::keyPressed (const juce::KeyPress& key)
         return true;
     }
 
+    if (key == juce::KeyPress ('f', juce::ModifierKeys::commandModifier | juce::ModifierKeys::shiftModifier, 0))
+    {
+        zoomToFit();
+        return true;
+    }
+
     if (key == juce::KeyPress ('=', juce::ModifierKeys::commandModifier, 0))
     {
         zoomAround (1.5, (float) headerWidth);
@@ -1309,6 +1315,15 @@ bool ArrangementView::keyPressed (const juce::KeyPress& key)
     }
 
     return false;
+}
+
+void ArrangementView::zoomToFit()
+{
+    const double endBeat = std::max (16.0, timeToBeat (te::TimePosition() + edit.getLength()));
+    const double width = (double) std::max (100, getWidth() - headerWidth - 20);
+    pixelsPerBeat = juce::jlimit (2.0, 400.0, width / endBeat);
+    scrollBeats = 0.0;
+    repaint();
 }
 
 //==============================================================================

@@ -470,6 +470,7 @@ void MainComponent::openProjectFile (const juce::File& file)
     loaded->getUndoManager().clearUndoHistory();
     loaded->resetChangedStatus();
     setEdit (std::move (loaded), file);
+    addToRecent (file);
 }
 
 void MainComponent::chooseAndOpenProject()
@@ -567,6 +568,8 @@ void MainComponent::saveProjectTo (const juce::File& file, std::function<void (b
         reopened->getTransport().setPosition (position);
         reopened->resetChangedStatus();
         setEdit (std::move (reopened), file);
+        addToRecent (file);
+        autosaveFile().deleteFile();
     }
 
     if (done)
@@ -630,6 +633,65 @@ void MainComponent::updateWindowTitle()
 void MainComponent::timerCallback()
 {
     updateWindowTitle();
+
+    if (++autosaveTicks >= 4 * 60)      // every minute
+    {
+        autosaveTicks = 0;
+        autosave();
+    }
+}
+
+juce::PropertiesFile& MainComponent::settings()
+{
+    if (settingsFile == nullptr)
+    {
+        juce::PropertiesFile::Options o;
+        o.applicationName = JUCE_APPLICATION_NAME_STRING;
+        o.filenameSuffix = ".settings";
+        o.osxLibrarySubFolder = "Application Support";
+        settingsFile = std::make_unique<juce::PropertiesFile> (o);
+    }
+
+    return *settingsFile;
+}
+
+juce::StringArray MainComponent::getRecent() const
+{
+    auto list = juce::StringArray::fromLines (const_cast<MainComponent*> (this)->settings().getValue ("recent"));
+    list.removeEmptyStrings();
+    return list;
+}
+
+void MainComponent::addToRecent (const juce::File& f)
+{
+    if (f == juce::File())
+        return;
+
+    auto list = getRecent();
+    list.removeString (f.getFullPathName());
+    list.insert (0, f.getFullPathName());
+    while (list.size() > 10)
+        list.remove (list.size() - 1);
+
+    settings().setValue ("recent", list.joinIntoString ("\n"));
+    settings().saveIfNeeded();
+}
+
+juce::File MainComponent::autosaveFile() const
+{
+    return juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory)
+        .getChildFile (JUCE_APPLICATION_NAME_STRING).getChildFile ("Autosave")
+        .getChildFile ((projectFile == juce::File() ? juce::String ("Untitled") : projectFile.getFileNameWithoutExtension()) + "-autosave" + projectSuffix);
+}
+
+void MainComponent::autosave()
+{
+    if (edit == nullptr || ! edit->hasChangedSinceSaved())
+        return;
+
+    auto f = autosaveFile();
+    f.getParentDirectory().createDirectory();
+    te::EditFileOperations (*edit).writeToFile (f, false);
 }
 
 //==============================================================================
@@ -656,6 +718,15 @@ juce::PopupMenu MainComponent::getMenuForIndex (int index, const juce::String&)
     {
         add (newProject,    "New Project",       "cmd + N");
         add (openProject,   "Open Project...",   "cmd + O");
+
+        juce::PopupMenu recent;
+        auto list = getRecent();
+        for (int i = 0; i < list.size(); ++i)
+            recent.addItem (recentBase + i, juce::File (list[i]).getFileName());
+        if (list.isEmpty())
+            recent.addItem (-1, "(none)", false);
+        m.addSubMenu ("Open Recent", recent);
+        add (recoverAutosave, "Recover Autosave...", "");
         m.addSeparator();
         add (saveProject,   "Save",              "cmd + S");
         add (saveProjectAs, "Save As...",        "shift + cmd + S");
@@ -692,6 +763,7 @@ juce::PopupMenu MainComponent::getMenuForIndex (int index, const juce::String&)
     {
         add (toggleMixer, "Show/Hide Mixer",   "cmd + M");
         add (toggleBrowser, "Show/Hide Browser", "cmd + B");
+        add (zoomFit,     "Zoom to Fit Project", "shift + cmd + F");
         add (toggleLoop,  "Loop",              "cmd + L");
         add (toggleClick, "Metronome",         "cmd + K");
     }
@@ -701,6 +773,14 @@ juce::PopupMenu MainComponent::getMenuForIndex (int index, const juce::String&)
 
 void MainComponent::menuItemSelected (int id, int)
 {
+    if (id >= recentBase && id < recentBase + 10)
+    {
+        auto list = getRecent();
+        if (id - recentBase < list.size())
+            confirmDiscardChanges ([this, f = juce::File (list[id - recentBase])] { openProjectFile (f); });
+        return;
+    }
+
     switch (id)
     {
         case newProject:     confirmDiscardChanges ([this] { newEmptyProject(); }); break;
@@ -716,6 +796,19 @@ void MainComponent::menuItemSelected (int id, int)
         case toggleAutomation: arrangement->toggleAutomationOnSelectedTrack(); break;
         case toggleMixer:    setMixerVisible (! mixerVisible); break;
         case toggleBrowser:  setBrowserVisible (! browserVisible); break;
+        case zoomFit:        arrangement->zoomToFit(); break;
+        case recoverAutosave:
+        {
+            auto dir = autosaveFile().getParentDirectory();
+            fileChooser = std::make_unique<juce::FileChooser> ("Recover autosave", dir, juce::String ("*") + projectSuffix);
+            fileChooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
+                                      [this] (const juce::FileChooser& fc)
+                                      {
+                                          if (fc.getResult().existsAsFile())
+                                              confirmDiscardChanges ([this, f = fc.getResult()] { openProjectFile (f); });
+                                      });
+            break;
+        }
         case toggleLoop:
         {
             auto& t = edit->getTransport();

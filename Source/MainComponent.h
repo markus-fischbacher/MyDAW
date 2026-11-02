@@ -30,7 +30,7 @@ private:
     enum MenuIDs { newProject = 1, openProject, saveProject, saveProjectAs, importAudio, exportAudio, undo, redo,
                    addAudioTrack, addInstrumentTrack, addReturnTrack, deleteTrack, toggleAutomation,
                    toggleMixer, toggleBrowser, toggleLoop, toggleClick, trackPlugins,
-                   insertTempo, resetTempoMap, setTimeSig, insertTimeSig, togglePunch, masterPlugins };
+                   insertTempo, resetTempoMap, setTimeSig, insertTimeSig, togglePunch, masterPlugins, zoomFit, recoverAutosave, recentBase = 1000 };
 
     // Project handling
     void setEdit (std::unique_ptr<te::Edit>, const juce::File& file);
@@ -51,6 +51,13 @@ private:
     void addAudioFileFromChooser();
     juce::String getProjectName() const;
     void updateWindowTitle();
+    void addToRecent (const juce::File&);
+    juce::StringArray getRecent() const;
+    juce::File autosaveFile() const;
+    void autosave();
+    int autosaveTicks = 0;
+    juce::PropertiesFile& settings();
+    std::unique_ptr<juce::PropertiesFile> settingsFile;
 
     // MenuBarModel
     juce::StringArray getMenuBarNames() override;

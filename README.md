@@ -28,6 +28,15 @@ Optional args: a `.tracktionedit` project to open, audio files (placed on consec
 | Delete clip | Backspace / Delete |
 | Undo / redo | Cmd+Z / Shift+Cmd+Z |
 | Zoom | Pinch, Cmd+scroll, Cmd+= / Cmd+- |
+| Clip menu (rename, colour, gain, fades, reverse, transpose, warp, takes) | Right-click a clip |
+| Fade in / out | Drag the white handles at the clip's top corners |
+| Duplicate clip | Cmd+D |
+| Return track / sends | Track menu > Add Return Track; green send slider and output button per mixer strip (route to a group track) |
+| Piano roll velocity / quantise / transpose | Drag in the velocity lane; Q quantises to grid; Up/Down arrows transpose selected note |
+| Browser (preview, insert, drag onto a lane) | Cmd+B; double-click inserts at the playhead |
+| Export (WAV/AIFF/FLAC/OGG, normalise, stems) | Shift+Cmd+E |
+| Zoom to fit | Shift+Cmd+F |
+| Recent projects / autosave recovery | File > Open Recent; autosaves every minute, File > Recover Autosave |
 | Scroll | Trackpad / wheel (Shift = horizontal) |
 | Locate | Click/drag in ruler |
 | Set loop range | Shift+drag in ruler; toggle with Loop button / Cmd+L |
