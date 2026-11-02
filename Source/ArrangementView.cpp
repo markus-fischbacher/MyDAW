@@ -603,6 +603,7 @@ void ArrangementView::showTrackMenu (int trackIndex)
     m.addSeparator();
     m.addItem (3, "Rename...", trackIndex >= 0);
     m.addItem (4, "Delete Track", trackIndex >= 0);
+    m.addItem (5, "Freeze Track (Bounce to New Track)", trackIndex >= 0);
 
     m.showMenuAsync ({}, [this, trackIndex] (int r)
     {
@@ -612,6 +613,18 @@ void ArrangementView::showTrackMenu (int trackIndex)
             case 2: addTrack (true); break;
             case 3: beginRename (trackIndex); break;
             case 4: deleteSelectedTrack(); break;
+            case 5:
+                if (auto* t = te::getAudioTracks (edit)[trackIndex])
+                {
+                    const auto len = edit.getLength();
+                    if (len.inSeconds() > 0.0)
+                        bounceToNewTrack (*t, { te::TimePosition(), te::TimePosition() + len }, t->getName(), [id = t->itemID, this]
+                        {
+                            if (auto* orig = dynamic_cast<te::AudioTrack*> (findTrackForID (edit, id)))
+                                orig->setMute (true);
+                        });
+                }
+                break;
             default: break;
         }
     });
@@ -675,6 +688,77 @@ void ArrangementView::addTrack (bool instrument)
 
         selectedTrackID = t->itemID;
     }
+    repaint();
+}
+
+void ArrangementView::bounceToNewTrack (te::AudioTrack& src, te::TimeRange range, const juce::String& name,
+                                        std::function<void()> muteOriginal)
+{
+    edit.getTransport().stop (false, false);
+
+    te::Renderer::Parameters p (edit);
+    p.destFile = edit.getTempDirectory (true).getNonexistentChildFile ("bounce", ".wav");
+    p.audioFormat = edit.engine.getAudioFileFormatManager().getWavFormat();
+    p.bitDepth = 24;
+    p.time = { range.getStart(), range.getEnd() + te::TimeDuration::fromSeconds (1.5) };      // tail for reverbs/delays
+    p.usePlugins = true;
+    p.useMasterPlugins = false;
+    p.tracksToDo.setBit (te::getAllTracks (edit).indexOf (&src));
+
+    const auto out = te::Renderer::renderToFile ("Bounce", p);
+
+
+    if (! out.existsAsFile())
+    {
+        juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, "Bounce",
+                                                "Nothing to bounce: the track is silent (a MIDI track needs an instrument).");
+        return;
+    }
+
+    edit.getUndoManager().beginNewTransaction();
+
+    if (auto t = edit.insertNewAudioTrack (te::TrackInsertPoint (nullptr, &src), nullptr))
+    {
+        t->setName (name + " (bounce)");
+        te::AudioFile af (edit.engine, out);
+        t->insertWaveClip (name, out, { { range.getStart(), te::TimeDuration::fromSeconds (af.getLength()) }, {} }, false);
+        selectedTrackID = t->itemID;
+    }
+
+    if (muteOriginal)
+        muteOriginal();
+
+    repaint();
+}
+
+void ArrangementView::crossfadeIntoNext (te::Clip& clip)
+{
+    auto* w = dynamic_cast<te::WaveAudioClip*> (&clip);
+    auto* track = dynamic_cast<te::ClipTrack*> (clip.getTrack());
+
+    if (w == nullptr || track == nullptr)
+        return;
+
+    te::WaveAudioClip* next = nullptr;
+    for (auto* other : track->getClips())
+        if (auto* ow = dynamic_cast<te::WaveAudioClip*> (other))
+            if (ow != w && ow->getPosition().getStart() >= w->getPosition().getStart()
+                && (next == nullptr || ow->getPosition().getStart() < next->getPosition().getStart()))
+                next = ow;
+
+    if (next == nullptr)
+        return;
+
+    auto overlap = w->getPosition().getEnd() - next->getPosition().getStart();
+
+    if (overlap.inSeconds() <= 0.0)      // butted up: extend this clip under the next one
+    {
+        overlap = te::TimeDuration::fromSeconds (0.1);
+        w->setEnd (w->getPosition().getEnd() + overlap, false);
+    }
+
+    w->setFadeOut (overlap);
+    next->setFadeIn (overlap);
     repaint();
 }
 
@@ -1626,6 +1710,11 @@ void ArrangementView::showClipMenu (te::EditItemID id)
         m.addItem (14, "Export MIDI File...");
     }
 
+    m.addSeparator();
+    m.addItem (15, "Bounce to New Track");
+    if (! isMidi)
+        m.addItem (16, "Crossfade into Next Clip");
+
     m.showMenuAsync ({}, [this, id] (int r)
     {
         auto* c = te::findClipForID (edit, id);
@@ -1655,6 +1744,15 @@ void ArrangementView::showClipMenu (te::EditItemID id)
                 if (c->getPosition().time.containsInclusive (t))
                     track->splitClip (*c, t);
         }
+        else if (r == 15)
+        {
+            if (auto* at = dynamic_cast<te::AudioTrack*> (c->getTrack()))
+                bounceToNewTrack (*at, c->getEditTimeRange(), c->getName(), [id] { /* muted below */ });
+
+            if (auto* cc = te::findClipForID (edit, id))
+                cc->setMuted (true);
+        }
+        else if (r == 16) crossfadeIntoNext (*c);
         else if (r == 14) { if (auto* mc = dynamic_cast<te::MidiClip*> (c)) exportMidiClip (*mc); }
         else if (r == 3)  duplicateSelectedClip();
         else if (r == 4)  { c->removeFromParent(); selectedClipID = {}; }

@@ -66,7 +66,7 @@ private:
 
     void timerCallback() override;
 
-    te::Engine engine { JUCE_APPLICATION_NAME_STRING };
+    te::Engine engine { JUCE_APPLICATION_NAME_STRING, std::make_unique<SyncUIBehaviour>(), nullptr };
     std::unique_ptr<te::Edit> edit;
     juce::File projectFile;     // empty while the project is untitled
 

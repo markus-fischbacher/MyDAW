@@ -24,6 +24,7 @@ public:
     /** Appends a track; instrument tracks get a synth so MIDI clips are audible. */
     void addTrack (bool instrument);
     void addReturnTrack();
+    void bounceToNewTrack (te::AudioTrack&, te::TimeRange, const juce::String& name, std::function<void()> muteOriginal);
     void importMidiFile (const juce::File&, int trackIndex, te::TimePosition start);
     void exportMidiClip (te::MidiClip&);
     void zoomToFit();
@@ -84,6 +85,7 @@ private:
     void showRulerMenu (const juce::MouseEvent&);
     void showClipMenu (te::EditItemID);
     void duplicateSelectedClip();
+    void crossfadeIntoNext (te::Clip&);
     void setClipWarp (te::WaveAudioClip&, bool on);
 public:
     void setClipWarpForDemo (te::WaveAudioClip& w) { setClipWarp (w, true); }

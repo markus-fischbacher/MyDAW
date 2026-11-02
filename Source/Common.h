@@ -21,3 +21,15 @@ namespace Palette
     const juce::Colour clip         { 0xff4f8fd8 };
     const juce::Colour midiClip     { 0xff58b368 };
 }
+
+/** Runs the engine's progress-bar tasks (rendering, tempo detection) synchronously on the calling thread. */
+struct SyncUIBehaviour : public te::UIBehaviour
+{
+    void showWarningMessage (const juce::String& m) override  { DBG ("engine warning: " << m); }
+
+    void runTaskWithProgressBar (te::ThreadPoolJobWithProgress& job) override
+    {
+        while (job.runJob() == juce::ThreadPoolJob::jobNeedsRunningAgain)
+        {}
+    }
+};

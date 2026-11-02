@@ -150,6 +150,13 @@ MainComponent::MainComponent()
         }
     }
 
+    // --demo-freeze: bounce the demo MIDI track to a new audio track
+    if (args.contains ("--demo-freeze"))
+    {
+        auto* track = te::getAudioTracks (*edit)[0];
+        arrangement->bounceToNewTrack (*track, { 0_tp, 2_tp }, "Loop", [track] { track->setMute (true); });
+    }
+
     // --demo-bus: a return track, a send on track 1, track 2 routed into track 3
     if (args.contains ("--demo-bus"))
     {
