@@ -536,8 +536,8 @@ void ArrangementView::paintClip (juce::Graphics& g, te::Clip& clip, juce::Rectan
         if (waveClip->getAutoTempo())            label << "  [warp]";
         if (waveClip->hasAnyTakes())             label << "  [" << waveClip->getTakeDescriptions().size() << " takes]";
         if (waveClip->getIsReversed())           label << "  [rev]";
-        if (waveClip->getTransposeSemiTones (false) != 0)
-            label << "  " << juce::String::formatted ("%+d st", waveClip->getTransposeSemiTones (false));
+        if (std::abs (waveClip->getPitchChange()) > 0.001f)
+            label << "  " << juce::String::formatted ("%+d st", juce::roundToInt (waveClip->getPitchChange()));
         if (std::abs (waveClip->getGainDB()) > 0.05f)
             label << "  " << juce::String (waveClip->getGainDB(), 1) << " dB";
     }
@@ -587,6 +587,14 @@ void ArrangementView::paintClip (juce::Graphics& g, te::Clip& clip, juce::Rectan
             auto body = b.withTrimmedTop (clipHeaderHeight).reduced (0, 2);
             g.setColour (colour.brighter (0.4f));
             thumb->drawChannels (g, body, sourceRange, juce::Decibels::decibelsToGain (wave->getGainDB()));
+
+            if (! wave->getAudioFile().getFile().existsAsFile())       // proxy (reverse / pitch / stretch) still being rendered
+            {
+                g.setColour (juce::Colours::white.withAlpha (0.8f));
+                g.setFont (juce::FontOptions (11.0f));
+                g.drawText ("rendering...", body, juce::Justification::centred);
+                repaint (b);
+            }
         }
         {
             auto body = b.withTrimmedTop (clipHeaderHeight).reduced (0, 2);
@@ -1731,9 +1739,13 @@ te::SmartThumbnail* ArrangementView::getThumbnailFor (te::WaveAudioClip& clip)
         return nullptr;
 
     auto& thumb = thumbnails[clip.itemID];
+    auto& known = thumbnailFiles[clip.itemID];
 
-    if (thumb == nullptr)
+    if (thumb == nullptr || known != file.getFile())      // reverse / stretch / pitch swap the clip's source for a proxy file
+    {
         thumb = std::make_unique<te::SmartThumbnail> (edit.engine, file, *this, &edit);
+        known = file.getFile();
+    }
 
     return thumb.get();
 }
@@ -2999,7 +3011,7 @@ void ArrangementView::showClipMenu (te::EditItemID id)
         }
         for (int i = 0; i < 11; ++i)
             transposeMenu.addItem (500 + i, juce::String::formatted ("%+d semitones", transposes[i]), true,
-                                   wave->getTransposeSemiTones (false) == transposes[i]);
+                                   std::abs (wave->getPitchChange() - (float) transposes[i]) < 0.01f);
 
         m.addSubMenu ("Gain", gainMenu);
         m.addSubMenu ("Fade In", fadeInMenu);
@@ -3102,7 +3114,10 @@ void ArrangementView::showClipMenu (te::EditItemID id)
             else if (r >= 500 && r < 511)
             {
                 static const int t[] = { -12, -7, -5, -2, -1, 0, 1, 2, 5, 7, 12 };
-                w->setTranspose (t[r - 500]);
+                w->setPitchChange ((float) t[r - 500]);       // audio pitch shift (setTranspose only affects auto-pitch / key)
+
+                if (t[r - 500] != 0 && w->getTimeStretchMode() == te::TimeStretcher::disabled)
+                    w->setTimeStretchMode (te::TimeStretcher::soundtouchBetter);
             }
             else if (r == 8)
             {

@@ -171,6 +171,55 @@ MainComponent::MainComponent()
         arrangement->bounceToNewTrack (*track, { 0_tp, 2_tp }, "Loop", [track] { track->setMute (true); });
     }
 
+    // --demo-reverse / --demo-transpose: apply the clip-menu operation to the first clip of track 2 (use with --demo-freeze)
+    if (args.contains ("--demo-reverse") || args.contains ("--demo-transpose") || args.contains ("--demo-warp")
+         || args.contains ("--demo-gain") || args.contains ("--demo-fades"))
+        if (auto* w = dynamic_cast<te::WaveAudioClip*> (te::getAudioTracks (*edit)[1]->getClips().getFirst()))
+        {
+            if (args.contains ("--demo-reverse"))   w->setIsReversed (true);
+            if (args.contains ("--demo-warp"))      arrangement->setClipWarpForDemo (*w);
+            if (args.contains ("--demo-gain"))      w->setGainDB (6.0f);
+            if (args.contains ("--demo-fades"))   { w->setFadeIn (te::TimeDuration::fromSeconds (0.5)); w->setFadeOut (te::TimeDuration::fromSeconds (0.5)); }
+            if (args.contains ("--demo-transpose")) { w->setPitchChange (5.0f); w->setTimeStretchMode (te::TimeStretcher::soundtouchBetter); }
+            std::cerr << "OPS clip len " << w->getPosition().getLength().inSeconds() << " file " << w->getAudioFile().getFile().getFullPathName()
+                      << " exists " << (int) w->getAudioFile().getFile().existsAsFile() << " rev " << (int) w->getIsReversed()
+                      << " proxy " << (int) w->usesTimeStretchedProxy() << std::endl;
+        }
+
+    // --demo-ops-render [--noproxy]: render track 2 and print where the energy sits (first vs last half second)
+    if (args.contains ("--demo-ops-render"))
+      juce::Timer::callAfterDelay (8000, [this, args]
+    {
+        auto* track = te::getAudioTracks (*edit)[1];
+        te::Renderer::Parameters rp (*edit);
+        rp.destFile = edit->getTempDirectory (true).getNonexistentChildFile ("opscheck", ".wav");
+        rp.audioFormat = engine.getAudioFileFormatManager().getWavFormat();
+        rp.bitDepth = 16;
+        rp.time = { 0_tp, te::TimePosition::fromSeconds (3.5) };
+        rp.usePlugins = true;
+        rp.useMasterPlugins = false;
+        rp.tracksToDo.setBit (te::getAllTracks (*edit).indexOf (track));
+        std::unique_ptr<ScopedNoProxies> np;
+        if (args.contains ("--noproxy")) np = std::make_unique<ScopedNoProxies> (*edit);
+        if (auto* w = dynamic_cast<te::WaveAudioClip*> (track->getClips().getFirst()))
+            std::cerr << "OPS after 8s: playback file " << w->getPlaybackFile().getFile().getFullPathName() << " exists "
+                      << (int) w->getPlaybackFile().getFile().existsAsFile() << std::endl;
+        std::cerr << "OPS rendering..." << std::endl;
+        auto out = te::Renderer::renderToFile ("check", rp);
+        np.reset();
+        juce::AudioFormatManager fm; fm.registerBasicFormats();
+        if (auto r = std::unique_ptr<juce::AudioFormatReader> (fm.createReaderFor (out)))
+        {
+            juce::AudioBuffer<float> b ((int) r->numChannels, (int) r->lengthInSamples);
+            r->read (&b, 0, b.getNumSamples(), 0, true, true);
+            const int half = (int) (r->sampleRate * 0.5);
+            std::cerr << "OPS render len " << r->lengthInSamples / r->sampleRate << "s  firstHalfSec peak " << b.getMagnitude (0, 0, half)
+                      << "  lastHalfSec(2.5-3.0) peak " << b.getMagnitude (0, (int) (r->sampleRate * 2.5), half)
+                      << "  total peak " << b.getMagnitude (0, b.getNumSamples()) << std::endl;
+        }
+        else std::cerr << "OPS render produced no file" << std::endl;
+    });
+
     // --demo-consolidate: render the first clip of track 2 in place
     if (args.contains ("--demo-consolidate"))
         if (auto* track = te::getAudioTracks (*edit)[1])

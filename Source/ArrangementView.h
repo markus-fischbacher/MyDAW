@@ -222,6 +222,7 @@ private:
     std::unique_ptr<juce::FileChooser> chooser;
     te::EditItemID renameTrackID;
     std::map<te::EditItemID, std::unique_ptr<te::SmartThumbnail>> thumbnails;
+    std::map<te::EditItemID, juce::File> thumbnailFiles;
 
     // Drag state
     DragMode dragMode = DragMode::none;
