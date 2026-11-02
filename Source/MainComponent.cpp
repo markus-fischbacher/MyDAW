@@ -171,6 +171,12 @@ MainComponent::MainComponent()
         arrangement->bounceToNewTrack (*track, { 0_tp, 2_tp }, "Loop", [track] { track->setMute (true); });
     }
 
+    // --demo-consolidate: render the first clip of track 2 in place
+    if (args.contains ("--demo-consolidate"))
+        if (auto* track = te::getAudioTracks (*edit)[0])
+            if (track->getClips().size() > 0)
+                arrangement->consolidateClip (track->getClips()[0]->itemID);
+
     // --demo-bus: a return track, a send on track 1, track 2 routed into track 3
     if (args.contains ("--demo-bus"))
     {

@@ -25,7 +25,10 @@ namespace Palette
 /** Runs the engine's progress-bar tasks (rendering, tempo detection) synchronously on the calling thread. */
 struct SyncUIBehaviour : public te::UIBehaviour
 {
-    void showWarningMessage (const juce::String& m) override  { DBG ("engine warning: " << m); }
+    void showWarningMessage (const juce::String& m) override  {
+        DBG ("engine warning: " << m);
+        juce::MessageManager::callAsync ([m] { juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, "Arranger", m); });
+    }
 
     void runTaskWithProgressBar (te::ThreadPoolJobWithProgress& job) override
     {

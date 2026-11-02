@@ -1046,6 +1046,54 @@ void ArrangementView::bounceToNewTrack (te::AudioTrack& src, te::TimeRange range
     repaint();
 }
 
+void ArrangementView::consolidateClip (te::EditItemID id)
+{
+    auto* clip = te::findClipForID (edit, id);
+    auto* track = clip != nullptr ? dynamic_cast<te::AudioTrack*> (clip->getTrack()) : nullptr;
+    if (track == nullptr)
+        return;
+
+    if (auto* w = dynamic_cast<te::WaveAudioClip*> (clip))
+        if (w->getAutoTempo())
+        {
+            juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::InfoIcon, "Consolidate",
+                                                    "Turn Warp off for this clip before consolidating (warped clips can't be rendered offline yet).");
+            return;
+        }
+
+    edit.getTransport().stop (false, false);
+    const auto range = clip->getEditTimeRange();
+    const auto name = clip->getName();
+
+    te::Renderer::Parameters p (edit);
+    p.destFile = edit.getTempDirectory (true).getNonexistentChildFile ("consolidated", ".wav");
+    p.audioFormat = edit.engine.getAudioFileFormatManager().getWavFormat();
+    p.bitDepth = 24;
+    p.time = range;
+    p.usePlugins = true;
+    p.useMasterPlugins = false;
+    p.tracksToDo.setBit (te::getAllTracks (edit).indexOf (track));
+
+    const auto out = te::Renderer::renderToFile ("Consolidate", p);
+
+    if (! out.existsAsFile())
+    {
+        juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, "Consolidate",
+                                                "Nothing to consolidate: the clip is silent (a MIDI clip needs an instrument on its track).");
+        return;
+    }
+
+    edit.getUndoManager().beginNewTransaction();
+    clip->removeFromParent();
+
+    te::AudioFile af (edit.engine, out);
+    if (auto nc = track->insertWaveClip (name + " (consolidated)", out,
+                                         { { range.getStart(), te::TimeDuration::fromSeconds (af.getLength()) }, {} }, false))
+        selectedClipID = nc->itemID;
+
+    repaint();
+}
+
 void ArrangementView::crossfadeIntoNext (te::Clip& clip)
 {
     auto* w = dynamic_cast<te::WaveAudioClip*> (&clip);
@@ -1607,6 +1655,16 @@ void ArrangementView::timerCallback()
 
 void ArrangementView::mouseMove (const juce::MouseEvent& e)
 {
+    if (e.y < rulerHeight && e.x >= headerWidth)
+    {
+        int ti, si;
+        if (markerAt (e.x, ti, si))
+        {
+            setMouseCursor (juce::MouseCursor::LeftRightResizeCursor);
+            return;
+        }
+    }
+
     if (e.y >= loopBarTop && e.y < rulerHeight && e.x >= headerWidth)
     {
         const auto lr = edit.getTransport().getLoopRange();
@@ -1647,6 +1705,7 @@ void ArrangementView::mouseMove (const juce::MouseEvent& e)
         case DragMode::laneResize:
         case DragMode::autoSelect:
         case DragMode::compSwipe:
+        case DragMode::markerMove:
         case DragMode::scrub:     setMouseCursor (juce::MouseCursor::NormalCursor); break;
     }
 }
@@ -1704,6 +1763,19 @@ void ArrangementView::mouseDown (const juce::MouseEvent& e)
     {
         showRulerMenu (e);
         return;
+    }
+
+    if (e.y < rulerHeight && e.x >= headerWidth && ! e.mods.isShiftDown())
+    {
+        int ti, si;
+        if (markerAt (e.x, ti, si))
+        {
+            dragMarkerTempo = ti;
+            dragMarkerSig = ti >= 0 ? -1 : si;
+            dragMode = DragMode::markerMove;
+            edit.getUndoManager().beginNewTransaction();
+            return;
+        }
     }
 
     if (e.y >= loopBarTop && e.y < rulerHeight && e.x >= headerWidth && ! e.mods.isShiftDown())
@@ -1779,6 +1851,23 @@ void ArrangementView::mouseDown (const juce::MouseEvent& e)
 void ArrangementView::mouseDrag (const juce::MouseEvent& e)
 {
     const bool bypassSnap = e.mods.isAltDown();
+
+    if (dragMode == DragMode::markerMove)
+    {
+        auto& seq = edit.tempoSequence;
+        const double b = juce::jmax (1.0, snapBeat (xToBeat (e.x), e.mods.isAltDown()));
+
+        if (dragMarkerTempo > 0 && dragMarkerTempo < seq.getNumTempos())
+            seq.getTempo (dragMarkerTempo)->setStartBeat (te::BeatPosition::fromBeats (b));
+        else if (dragMarkerSig > 0 && dragMarkerSig < seq.getTimeSigs().size())
+        {
+            const int bar = beatToBar (b);        // time signatures always start on a bar line
+            seq.getTimeSig (dragMarkerSig)->startBeatNumber = seq.toBeats (te::tempo::BarsAndBeats { bar, te::BeatDuration() });
+        }
+
+        repaint();
+        return;
+    }
 
     if (dragMode == DragMode::compSwipe)
     {
@@ -1933,6 +2022,7 @@ void ArrangementView::mouseDrag (const juce::MouseEvent& e)
         case DragMode::laneResize:
         case DragMode::autoSelect:
         case DragMode::compSwipe:
+        case DragMode::markerMove:
             break;
     }
 }
@@ -2006,7 +2096,7 @@ void ArrangementView::mouseUp (const juce::MouseEvent&)
         swipeTake = -1;
     }
 
-    dragAutoIndex = -1;
+    dragAutoIndex = dragMarkerTempo = dragMarkerSig = -1;
     dragMode = DragMode::none;
     dragClipID = {};
 }
@@ -2488,6 +2578,7 @@ void ArrangementView::showClipMenu (te::EditItemID id)
 
     m.addSeparator();
     m.addItem (15, "Bounce to New Track");
+    m.addItem (16, "Consolidate in Place (render clip with its effects)");
     if (! isMidi)
         m.addItem (16, "Crossfade into Next Clip");
 
@@ -2520,6 +2611,8 @@ void ArrangementView::showClipMenu (te::EditItemID id)
                 if (c->getPosition().time.containsInclusive (t))
                     track->splitClip (*c, t);
         }
+        else if (r == 16)
+            consolidateClip (id);
         else if (r == 15)
         {
             if (auto* at = dynamic_cast<te::AudioTrack*> (c->getTrack()))

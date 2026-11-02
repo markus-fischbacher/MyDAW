@@ -28,6 +28,7 @@ public:
     void importMidiFile (const juce::File&, int trackIndex, te::TimePosition start);
     void exportMidiClip (te::MidiClip&);
     void zoomToFit();
+    void consolidateClip (te::EditItemID);
     void deleteSelectedTrack();
     bool hasSelectedTrack() const           { return getSelectedTrack() != nullptr; }
     void toggleAutomationOnSelectedTrack();
@@ -60,7 +61,7 @@ public:
     std::function<juce::File()> getDraggedBrowserFile;
 
 private:
-    enum class DragMode { none, scrub, move, trimStart, trimEnd, automation, loopRange, fadeIn, fadeOut, loopStart, loopEnd, loopMove, laneResize, autoSelect, compSwipe };
+    enum class DragMode { none, scrub, move, trimStart, trimEnd, automation, loopRange, fadeIn, fadeOut, loopStart, loopEnd, loopMove, laneResize, autoSelect, compSwipe, markerMove };
 
     struct ClipHit
     {
@@ -141,6 +142,7 @@ private:
     double timelineToCompTime (te::WaveAudioClip&, double beat) const;
     void paintCompLanes (juce::Graphics&, te::AudioTrack&, int y);
     void commitSwipe();
+    int dragMarkerTempo = -1, dragMarkerSig = -1;
     void compMouseDown (const juce::MouseEvent&, te::AudioTrack&, int take);
     std::set<te::EditItemID> compTracks;
     te::EditItemID swipeClipID;
