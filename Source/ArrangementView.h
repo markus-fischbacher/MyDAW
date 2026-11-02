@@ -110,7 +110,7 @@ private:
     te::AudioTrack* getSelectedTrack() const;
 
     // Track headers
-    enum class HeaderButton { none, mute, solo, arm, automation, param };
+    enum class HeaderButton { none, mute, solo, arm, automation, param, expand };
     juce::Rectangle<int> headerButtonRect (int trackIndex, HeaderButton) const;
     HeaderButton hitTestHeaderButton (juce::Point<int>, int trackIndex) const;
     void headerClicked (const juce::MouseEvent&);

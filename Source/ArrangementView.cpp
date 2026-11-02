@@ -708,6 +708,51 @@ void ArrangementView::paintHeaders (juce::Graphics& g)
             drawButton (HeaderButton::param, fx ? "FX" : pan ? "Pan" : "Vol", true, Palette::accent.withAlpha (0.7f));
         }
 
+        {
+            auto br = headerButtonRect (i, HeaderButton::expand).toFloat();
+            const bool open = isExpanded (*t);
+            g.setColour (open ? Palette::accent : Palette::background);
+            g.fillRoundedRectangle (br, 3.0f);
+            juce::Path chevron;
+            const auto cx = br.getCentreX(), cy = br.getCentreY();
+            if (open)  chevron.addTriangle (cx - 4.0f, cy - 2.0f, cx + 4.0f, cy - 2.0f, cx, cy + 3.0f);
+            else       chevron.addTriangle (cx - 2.0f, cy - 4.0f, cx - 2.0f, cy + 4.0f, cx + 3.0f, cy);
+            g.setColour (open ? juce::Colours::black : Palette::textDim);
+            g.fillPath (chevron);
+        }
+
+        if (autoOn)
+        {
+            if (auto* ap = getAutoParam (*t))
+            {
+                g.setColour (Palette::accent.withAlpha (0.85f));
+                g.setFont (juce::FontOptions (11.0f));
+                g.drawText (ap->getParameterName(), 10, trackY (i) + 60, headerWidth - 18, 16, juce::Justification::centredLeft, true);
+            }
+        }
+
+        if (isExpanded (*t))
+        {
+            int ly = trackY (i) + trackHeight;
+            for (auto& l : expandedLanes (*t))
+            {
+                g.setColour (juce::Colours::black.withAlpha (0.25f));
+                g.fillRect (4, ly, headerWidth - 4, autoLaneHeight);
+                g.setColour (juce::Colours::white.withAlpha (0.45f));
+                g.drawHorizontalLine (ly + autoLaneHeight - 1, 0.0f, (float) headerWidth);
+                g.setColour (Palette::textDim);
+                g.setFont (juce::FontOptions (11.0f));
+                g.drawText (l.label, 10, ly + 2, headerWidth - 40, 16, juce::Justification::centredLeft, true);
+
+                auto hb = juce::Rectangle<float> ((float) headerWidth - 24.0f, (float) ly + 3.0f, 16.0f, 16.0f);
+                g.setColour (Palette::background);
+                g.fillRoundedRectangle (hb, 3.0f);
+                g.setColour (Palette::textDim);
+                g.drawLine (hb.getX() + 4.0f, hb.getCentreY(), hb.getRight() - 4.0f, hb.getCentreY(), 1.5f);   // "hide lane"
+                ly += autoLaneHeight;
+            }
+        }
+
         g.setColour (Palette::background);
         g.drawHorizontalLine (r.getBottom() - 1, 0.0f, (float) headerWidth);
     }
@@ -727,6 +772,7 @@ juce::Rectangle<int> ArrangementView::headerButtonRect (int trackIndex, HeaderBu
         case HeaderButton::arm:         return { 66, y, 24, h };
         case HeaderButton::automation:  return { 94, y, 24, h };
         case HeaderButton::param:       return { 122, y, 34, h };
+        case HeaderButton::expand:      return { headerWidth - 26, trackY (trackIndex) + 8, 18, 18 };
         case HeaderButton::none:        break;
     }
     return {};
@@ -734,7 +780,7 @@ juce::Rectangle<int> ArrangementView::headerButtonRect (int trackIndex, HeaderBu
 
 ArrangementView::HeaderButton ArrangementView::hitTestHeaderButton (juce::Point<int> p, int trackIndex) const
 {
-    for (auto b : { HeaderButton::mute, HeaderButton::solo, HeaderButton::arm, HeaderButton::automation, HeaderButton::param })
+    for (auto b : { HeaderButton::mute, HeaderButton::solo, HeaderButton::arm, HeaderButton::automation, HeaderButton::param, HeaderButton::expand })
     {
         if (b == HeaderButton::param)
         {
@@ -777,10 +823,30 @@ void ArrangementView::headerClicked (const juce::MouseEvent& e)
         return;
     }
 
+    if (isExpanded (*t) && e.x >= headerWidth - 28)
+    {
+        const int rel = e.y - trackY (index) - trackHeight;
+        auto lanes = expandedLanes (*t);
+        const int k = rel >= 0 ? rel / autoLaneHeight : -1;
+        if (juce::isPositiveAndBelow (k, (int) lanes.size()) && rel % autoLaneHeight < 22)
+        {
+            hiddenLanes.insert (lanes[(size_t) k].param);
+            repaint();
+            return;
+        }
+    }
+
     edit.getUndoManager().beginNewTransaction();
 
     switch (hitTestHeaderButton (e.getPosition(), index))
     {
+        case HeaderButton::expand:
+            if (! expandedTracks.erase (t->itemID))
+            {
+                expandedTracks.insert (t->itemID);
+                hiddenLanes.clear();
+            }
+            break;
         case HeaderButton::mute:        t->setMute (! t->isMuted (false)); break;
         case HeaderButton::solo:        t->setSolo (! t->isSolo (false)); break;
         case HeaderButton::arm:         toggleArm (*t); break;
@@ -1350,12 +1416,11 @@ void ArrangementView::paintAutomationLane (juce::Graphics& g, te::AutomatablePar
     auto* p = &param;
     g.setColour (juce::Colours::black.withAlpha (0.35f));
     g.fillRect (lane);
-    g.setColour (Palette::background);
+    juce::ignoreUnused (label);     // lane names are drawn in the track header, outside the envelope
+    g.setColour (juce::Colours::white.withAlpha (0.45f));
     g.drawHorizontalLine (lane.getBottom() - 1, (float) lane.getX(), (float) lane.getRight());
-
-    g.setColour (Palette::textDim);
-    g.setFont (juce::FontOptions (11.0f));
-    g.drawText (label, lane.reduced (6, 2).removeFromTop (14), juce::Justification::centredLeft);
+    g.setColour (juce::Colours::white.withAlpha (0.2f));
+    g.drawHorizontalLine (lane.getY(), (float) lane.getX(), (float) lane.getRight());
 
     auto& curve = p->getCurve();
     const int n = curve.getNumPoints();
