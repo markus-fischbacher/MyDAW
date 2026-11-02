@@ -453,12 +453,42 @@ void PianoRoll::mouseDrag (const juce::MouseEvent& e)
     }
 }
 
+// Same-pitch notes may not overlap. Like Ableton Live, the note just placed/moved/resized wins and the
+// notes it lands on are shortened (or removed if completely covered).
+void PianoRoll::resolveOverlaps (te::MidiClip& clip, te::MidiNote& placed)
+{
+    auto* um = &edit.getUndoManager();
+    const double ns = placed.getStartBeat().inBeats(), ne = ns + placed.getLengthBeats().inBeats();
+    std::vector<te::MidiNote*> hits;
+
+    for (auto* o : clip.getSequence().getNotes())
+        if (o != &placed && o->getNoteNumber() == placed.getNoteNumber()
+             && o->getStartBeat().inBeats() < ne - 1.0e-6
+             && o->getStartBeat().inBeats() + o->getLengthBeats().inBeats() > ns + 1.0e-6)
+            hits.push_back (o);
+
+    for (auto* o : hits)
+    {
+        const double os = o->getStartBeat().inBeats(), oe = os + o->getLengthBeats().inBeats();
+
+        if (os < ns - 1.0e-6)
+            o->setStartAndLength (o->getStartBeat(), te::BeatDuration::fromBeats (ns - os), um);                     // trim its end
+        else if (oe <= ne + 1.0e-6)
+            clip.getSequence().removeNote (*o, um);                                                                // fully covered
+        else
+            o->setStartAndLength (te::BeatPosition::fromBeats (ne), te::BeatDuration::fromBeats (oe - ne), um);   // trim its start
+    }
+}
+
 void PianoRoll::mouseUp (const juce::MouseEvent&)
 {
     auto* clip = getClip();
 
     if (clip != nullptr && dragMode != DragMode::none && isLive (*clip, selectedNote))
+    {
         lastNoteLength = selectedNote->getLengthBeats().inBeats();
+        resolveOverlaps (*clip, *selectedNote);
+    }
 
     dragMode = DragMode::none;
     velNote = nullptr;
@@ -603,6 +633,7 @@ bool PianoRoll::keyPressed (const juce::KeyPress& key)
         edit.getUndoManager().beginNewTransaction();
         const int step = key == juce::KeyPress::upKey ? 1 : -1;
         selectedNote->setNoteNumber (juce::jlimit (0, 127, selectedNote->getNoteNumber() + step), &edit.getUndoManager());
+        resolveOverlaps (*clip, *selectedNote);
         return true;
     }
 

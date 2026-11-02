@@ -54,6 +54,7 @@ private:
     te::MidiNote* hitTestVelocity (te::MidiClip&, juce::Point<int>) const;
     void setVelocityFromY (te::MidiNote&, int y);
     void quantiseNotes();
+    void resolveOverlaps (te::MidiClip&, te::MidiNote&);
     int ccMax() const                           { return ccType == te::MidiControllerEvent::pitchWheelType ? 16383 : 127; }
     juce::String laneName() const;
     te::MidiControllerEvent* hitTestCC (te::MidiClip&, juce::Point<int>) const;
