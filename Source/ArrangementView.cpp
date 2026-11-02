@@ -52,6 +52,12 @@ static void ensureInstrument (te::AudioTrack& track)
 
 double ArrangementView::beatToX (double beat) const       { return headerWidth + (beat - scrollBeats) * pixelsPerBeat; }
 double ArrangementView::xToBeat (double x) const          { return (x - headerWidth) / pixelsPerBeat + scrollBeats; }
+double ArrangementView::beatsPerBar() const
+{
+    auto& ts = edit.tempoSequence.getTimeSigAt (0_tp);
+    return juce::jmax (1.0, ts.numerator.get() * 4.0 / juce::jmax (1, ts.denominator.get()));
+}
+
 double ArrangementView::timeToBeat (te::TimePosition t) const { return edit.tempoSequence.toBeats (t).inBeats(); }
 double ArrangementView::timeToX (te::TimePosition t) const    { return beatToX (timeToBeat (t)); }
 
@@ -204,7 +210,7 @@ void ArrangementView::paintGrid (juce::Graphics& g, juce::Rectangle<int> lanes)
 
     for (auto beat = firstBeat; beat <= lastBeat; beat += gridBeats)
     {
-        const bool isBar = std::fmod (beat, 4.0) == 0.0;
+        const bool isBar = std::fmod (beat, beatsPerBar()) == 0.0;
         g.setColour (isBar ? Palette::gridBar : Palette::gridBeat);
         g.drawVerticalLine (juce::roundToInt (beatToX (beat)), (float) lanes.getY(), (float) lanes.getBottom());
     }
@@ -329,19 +335,31 @@ void ArrangementView::paintRuler (juce::Graphics& g)
         }
     }
 
+    g.setFont (juce::FontOptions (10.0f));
+    for (int i = 1; i < edit.tempoSequence.getNumTempos(); ++i)
+    {
+        auto* tempo = edit.tempoSequence.getTempo (i);
+        const int x = (int) timeToX (tempo->getStartTime());
+        if (x < headerWidth)
+            continue;
+        g.setColour (Palette::accent);
+        g.fillRect (x, ruler.getBottom() - 8, 2, 8);
+        g.drawText (juce::String (tempo->getBpm(), 1), x + 3, ruler.getBottom() - 12, 50, 12, juce::Justification::centredLeft);
+    }
+
     // Bar numbers, thinned out as you zoom out
     int barStep = 1;
-    while (barStep * 4.0 * pixelsPerBeat < 40.0)
+    while (barStep * beatsPerBar() * pixelsPerBeat < 40.0)
         barStep *= 2;
 
-    const int firstBar = juce::jmax (0, (int) std::floor (xToBeat (ruler.getX()) / 4.0));
-    const int lastBar = (int) std::ceil (xToBeat (ruler.getRight()) / 4.0);
+    const int firstBar = juce::jmax (0, (int) std::floor (xToBeat (ruler.getX()) / beatsPerBar()));
+    const int lastBar = (int) std::ceil (xToBeat (ruler.getRight()) / beatsPerBar());
 
     g.setFont (juce::FontOptions (11.0f));
 
     for (int bar = firstBar - (firstBar % barStep); bar <= lastBar; bar += barStep)
     {
-        const auto x = juce::roundToInt (beatToX (bar * 4.0));
+        const auto x = juce::roundToInt (beatToX (bar * beatsPerBar()));
 
         if (x < ruler.getX())
             continue;
@@ -1038,8 +1056,8 @@ void ArrangementView::mouseDoubleClick (const juce::MouseEvent& e)
     if (! juce::isPositiveAndBelow (index, tracks.size()))
         return;
 
-    const auto startBeat = juce::jmax (0.0, std::floor (xToBeat (e.x) / 4.0) * 4.0);
-    const te::TimeRange range (beatToTime (startBeat), beatToTime (startBeat + 4.0));
+    const auto startBeat = juce::jmax (0.0, std::floor (xToBeat (e.x) / beatsPerBar()) * beatsPerBar());
+    const te::TimeRange range (beatToTime (startBeat), beatToTime (startBeat + beatsPerBar()));
 
     edit.getUndoManager().beginNewTransaction();
     ensureInstrument (*tracks[index]);

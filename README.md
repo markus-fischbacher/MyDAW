@@ -39,6 +39,10 @@ Optional args: a `.tracktionedit` project to open, audio files (placed on consec
 | Mute / solo | M / S buttons in header or mixer |
 | Automation (volume / pan) | A button in header (Cmd+A), Vol/Pan toggles parameter; click adds a point, drag moves, Alt-click or right-click deletes |
 | Record | R button arms a track (audio input, or MIDI inputs on instrument tracks); Rec button / Cmd+R records armed tracks; stop to finish |
+| Plug-ins (built-in FX, AU/VST3, instruments) | FX button in the mixer strip, or Cmd+P for the selected track; the menu also scans for plug-ins and opens editors |
+| Tempo change / remove | Project menu: Insert Tempo Change at Playhead, Remove Tempo Changes (markers show in the ruler) |
+| Time signature | Project menu: Set Time Signature (applies to the whole project) |
+| Punch in/out | Punch button or Shift+Cmd+P; records only inside the loop range (Shift+drag in ruler) |
 | Export WAV | Shift+Cmd+E |
 
 ## Layout

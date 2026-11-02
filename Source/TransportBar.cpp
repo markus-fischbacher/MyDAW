@@ -39,7 +39,7 @@ TransportBar::TransportBar (te::Edit& e)
     addFileButton.onClick  = [this] { if (onAddFile) onAddFile(); };
     settingsButton.onClick = [this] { if (onShowSettings) onShowSettings(); };
 
-    for (auto* b : { &loopButton, &clickButton, &mixerButton })
+    for (auto* b : { &loopButton, &clickButton, &mixerButton, &punchButton })
         b->setClickingTogglesState (true);
 
     loopButton.setToggleState (transport.looping.get(), juce::dontSendNotification);
@@ -50,6 +50,14 @@ TransportBar::TransportBar (te::Edit& e)
         t.looping = loopButton.getToggleState();
 
         if (t.looping && t.getLoopRange().getLength().inSeconds() <= 0.0)
+            t.setLoopRange ({ 0_tp, edit.tempoSequence.toTime (te::BeatPosition::fromBeats (16.0)) });
+    };
+    punchButton.setToggleState (edit.recordingPunchInOut.get(), juce::dontSendNotification);
+    punchButton.onClick = [this]
+    {
+        edit.recordingPunchInOut = punchButton.getToggleState();
+        auto& t = edit.getTransport();
+        if (punchButton.getToggleState() && t.getLoopRange().getLength().inSeconds() <= 0.0)
             t.setLoopRange ({ 0_tp, edit.tempoSequence.toTime (te::BeatPosition::fromBeats (16.0)) });
     };
     clickButton.onClick = [this] { edit.clickTrackEnabled = clickButton.getToggleState(); };
@@ -73,7 +81,7 @@ TransportBar::TransportBar (te::Edit& e)
     positionLabel.setFont (juce::FontOptions (20.0f, juce::Font::bold));
     cpuLabel.setColour (juce::Label::textColourId, Palette::textDim);
 
-    for (auto* b : { &playButton, &stopButton, &recordButton, &addFileButton, &settingsButton, &loopButton, &clickButton, &mixerButton })
+    for (auto* b : { &playButton, &stopButton, &recordButton, &addFileButton, &settingsButton, &loopButton, &clickButton, &punchButton, &mixerButton })
     {
         b->setWantsKeyboardFocus (false);
         addAndMakeVisible (*b);
@@ -112,6 +120,8 @@ void TransportBar::resized()
     loopButton.setBounds (r.removeFromLeft (60));
     r.removeFromLeft (4);
     clickButton.setBounds (r.removeFromLeft (60));
+    r.removeFromLeft (4);
+    punchButton.setBounds (r.removeFromLeft (64));
     r.removeFromLeft (4);
     mixerButton.setBounds (r.removeFromLeft (64));
 
@@ -156,6 +166,7 @@ void TransportBar::timerCallback()
     updateButtons();
     loopButton.setToggleState (edit.getTransport().looping.get(), juce::dontSendNotification);
     clickButton.setToggleState (edit.clickTrackEnabled.get(), juce::dontSendNotification);
+    punchButton.setToggleState (edit.recordingPunchInOut.get(), juce::dontSendNotification);
     cpuLabel.setText ("CPU " + juce::String (juce::roundToInt (edit.engine.getDeviceManager().getCpuUsage() * 100.0)) + "%",
                       juce::dontSendNotification);
 }

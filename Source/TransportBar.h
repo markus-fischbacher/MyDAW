@@ -26,7 +26,7 @@ private:
 
     juce::TextButton playButton { "Play" }, stopButton { "Stop" }, recordButton { "Rec" },
                      addFileButton { "Add Audio..." }, settingsButton { "Audio Settings" },
-                     loopButton { "Loop" }, clickButton { "Click" }, mixerButton { "Mixer" };
+                     loopButton { "Loop" }, clickButton { "Click" }, punchButton { "Punch" }, mixerButton { "Mixer" };
     juce::Label positionLabel, timeLabel, tempoLabel, cpuLabel;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (TransportBar)

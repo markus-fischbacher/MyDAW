@@ -1,4 +1,5 @@
 #include "MixerView.h"
+#include "PluginUI.h"
 
 namespace
 {
@@ -118,6 +119,8 @@ public:
             solo.setColour (juce::TextButton::buttonOnColourId, juce::Colour (0xff3a8fd0));
             mute.setToggleState (track->isMuted (false), juce::dontSendNotification);
             solo.setToggleState (track->isSolo (false), juce::dontSendNotification);
+            fx.onClick = [this] { PluginUI::showTrackMenu (edit.engine, *track); };
+            addAndMakeVisible (fx);
             mute.onClick = [this] { track->setMute (mute.getToggleState()); };
             solo.onClick = [this] { track->setSolo (solo.getToggleState()); };
         }
@@ -154,6 +157,8 @@ public:
         pan.setBounds (r.removeFromTop (22));
         if (track != nullptr)
         {
+            fx.setBounds (r.removeFromBottom (22).reduced (1));
+            r.removeFromBottom (2);
             auto row = r.removeFromBottom (24);
             mute.setBounds (row.removeFromLeft (row.getWidth() / 2).reduced (1));
             solo.setBounds (row.reduced (1));
@@ -199,7 +204,7 @@ private:
 
     juce::Label name;
     juce::Slider pan, fader;
-    juce::TextButton mute { "M" }, solo { "S" };
+    juce::TextButton mute { "M" }, solo { "S" }, fx { "FX" };
     Meter meterComp;
 };
 

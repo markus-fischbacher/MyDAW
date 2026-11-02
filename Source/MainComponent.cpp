@@ -1,4 +1,5 @@
 #include "MainComponent.h"
+#include "PluginUI.h"
 
 static constexpr int numInitialTracks = 8;
 
@@ -31,6 +32,7 @@ MainComponent::MainComponent()
     juce::MenuBarModel::setMacMainMenu (this);
    #endif
 
+    PluginUI::loadKnownPlugins (engine);
     startTimerHz (4);
 
     // --save-and-quit <file>: save the project to a file and exit (scripted checks)
@@ -94,6 +96,20 @@ MainComponent::MainComponent()
         });
     }
 
+    // --demo-extras: reverb on track 1, 3/4 time, a tempo change at bar 3, punch range
+    if (args.contains ("--demo-extras"))
+    {
+        auto* t = te::getAudioTracks (*edit)[0];
+        if (auto p = edit->getPluginCache().createNewPlugin (te::ReverbPlugin::xmlTypeName, {}))
+            t->pluginList.insertPlugin (p, 0, nullptr);
+
+        edit->tempoSequence.getTimeSig (0)->setStringTimeSig ("3/4");
+        edit->tempoSequence.insertTempo (te::BeatPosition::fromBeats (6.0), 90.0, 1.0f);
+        edit->recordingPunchInOut = true;
+        edit->getTransport().setLoopRange ({ te::TimePosition::fromSeconds (2.0), te::TimePosition::fromSeconds (6.0) });
+        edit->getTransport().looping = true;
+    }
+
     // --snapshot <file.png>: render the window to an image once thumbnails are ready, then quit.
     // Handy for visual checks and CI without touching the screen.
     const int snapIndex = args.indexOf ("--snapshot");
@@ -119,6 +135,7 @@ MainComponent::~MainComponent()
    #endif
 
     edit->getTransport().stop (false, false);
+    PluginUI::closeAllWindows();
     pianoRoll = nullptr;
     mixer = nullptr;
     arrangement = nullptr;
@@ -154,6 +171,7 @@ void MainComponent::setEdit (std::unique_ptr<te::Edit> newEdit, const juce::File
         edit->getTransport().stop (false, false);
 
     // Views reference the edit, so they have to go before it does
+    PluginUI::closeAllWindows();
     pianoRoll = nullptr;
     mixer = nullptr;
     arrangement = nullptr;
@@ -208,6 +226,20 @@ void MainComponent::setMixerVisible (bool shouldBeVisible)
     mixer->setVisible (shouldBeVisible);
     transportBar->setMixerShown (shouldBeVisible);
     resized();
+}
+
+void MainComponent::askForText (const juce::String& title, const juce::String& message, const juce::String& initial,
+                                std::function<void (juce::String)> done)
+{
+    auto* w = new juce::AlertWindow (title, message, juce::MessageBoxIconType::NoIcon);
+    w->addTextEditor ("text", initial);
+    w->addButton ("OK", 1, juce::KeyPress (juce::KeyPress::returnKey));
+    w->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
+    w->enterModalState (true, juce::ModalCallbackFunction::create ([w, cb = std::move (done)] (int r)
+    {
+        if (r == 1)
+            cb (w->getTextEditorContents ("text"));
+    }), true);
 }
 
 void MainComponent::exportAudioFromChooser()
@@ -453,7 +485,7 @@ void MainComponent::timerCallback()
 
 juce::StringArray MainComponent::getMenuBarNames()
 {
-    return { "File", "Edit", "Track", "View" };
+    return { "File", "Edit", "Track", "View", "Project" };
 }
 
 juce::PopupMenu MainComponent::getMenuForIndex (int index, const juce::String&)
@@ -491,6 +523,15 @@ juce::PopupMenu MainComponent::getMenuForIndex (int index, const juce::String&)
         add (deleteTrack,        "Delete Selected Track", "");
         m.addSeparator();
         add (toggleAutomation,   "Show/Hide Automation",  "cmd + A");
+        add (trackPlugins,       "Plug-ins...",           "cmd + P");
+    }
+    else if (index == 4)
+    {
+        add (insertTempo,   "Insert Tempo Change at Playhead...", "");
+        add (resetTempoMap, "Remove Tempo Changes",                "");
+        add (setTimeSig,    "Set Time Signature...",               "");
+        m.addSeparator();
+        add (togglePunch,   "Punch In/Out Recording",              "shift + cmd + P");
     }
     else
     {
@@ -525,6 +566,50 @@ void MainComponent::menuItemSelected (int id, int)
                 t.setLoopRange ({ 0_tp, edit->tempoSequence.toTime (te::BeatPosition::fromBeats (16.0)) });
             break;
         }
+        case trackPlugins:
+            if (auto* t = arrangement->selectedTrack())
+                PluginUI::showTrackMenu (engine, *t);
+            break;
+        case insertTempo:
+        {
+            const auto pos = edit->getTransport().getPosition();
+            askForText ("Tempo change", "BPM at the playhead:", juce::String (edit->tempoSequence.getBpmAt (pos), 2),
+                        [this, pos] (juce::String text)
+                        {
+                            const auto bpm = text.getDoubleValue();
+                            if (bpm < 20.0 || bpm > 400.0)
+                                return;
+                            edit->getUndoManager().beginNewTransaction();
+                            auto beat = edit->tempoSequence.toBeats (pos);
+                            if (pos.inSeconds() <= 0.0)
+                                edit->tempoSequence.getTempo (0)->setBpm (bpm);
+                            else
+                                edit->tempoSequence.insertTempo (beat, bpm, 1.0f);
+                        });
+            break;
+        }
+        case resetTempoMap:
+            edit->getUndoManager().beginNewTransaction();
+            while (edit->tempoSequence.getNumTempos() > 1)
+                edit->tempoSequence.removeTempo (edit->tempoSequence.getNumTempos() - 1, false);
+            break;
+        case setTimeSig:
+            askForText ("Time signature", "Time signature (e.g. 3/4, 6/8):",
+                        edit->tempoSequence.getTimeSig (0)->getStringTimeSig(),
+                        [this] (juce::String text)
+                        {
+                            if (text.containsChar ('/'))
+                            {
+                                edit->getUndoManager().beginNewTransaction();
+                                edit->tempoSequence.getTimeSig (0)->setStringTimeSig (text.trim());
+                            }
+                        });
+            break;
+        case togglePunch:
+            edit->recordingPunchInOut = ! edit->recordingPunchInOut.get();
+            if (edit->recordingPunchInOut.get() && edit->getTransport().getLoopRange().getLength().inSeconds() <= 0.0)
+                edit->getTransport().setLoopRange ({ 0_tp, edit->tempoSequence.toTime (te::BeatPosition::fromBeats (16.0)) });
+            break;
         case toggleClick:    edit->clickTrackEnabled = ! edit->clickTrackEnabled.get(); break;
         case undo:           edit->undo(); break;
         case redo:           edit->redo(); break;
@@ -582,6 +667,8 @@ bool MainComponent::keyPressed (const juce::KeyPress& key)
         { { 'm', cmd, 0 },         toggleMixer },
         { { 'l', cmd, 0 },         toggleLoop },
         { { 'k', cmd, 0 },         toggleClick },
+        { { 'p', cmd, 0 },         trackPlugins },
+        { { 'p', cmd | shift, 0 }, togglePunch },
         { { 'z', cmd, 0 },         undo },
         { { 'z', cmd | shift, 0 }, redo },
     };

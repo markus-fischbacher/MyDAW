@@ -26,6 +26,8 @@ public:
     bool hasSelectedTrack() const           { return getSelectedTrack() != nullptr; }
     void toggleAutomationOnSelectedTrack();
     void selectTrackIndex (int index);
+    te::AudioTrack* selectedTrack() const   { return getSelectedTrack(); }
+    double beatsPerBar() const;
     void toggleArm (te::AudioTrack&);
     bool isArmed (te::AudioTrack&) const;
 

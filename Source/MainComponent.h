@@ -27,7 +27,8 @@ public:
 private:
     enum MenuIDs { newProject = 1, openProject, saveProject, saveProjectAs, importAudio, exportAudio, undo, redo,
                    addAudioTrack, addInstrumentTrack, deleteTrack, toggleAutomation,
-                   toggleMixer, toggleLoop, toggleClick };
+                   toggleMixer, toggleLoop, toggleClick, trackPlugins,
+                   insertTempo, resetTempoMap, setTimeSig, togglePunch };
 
     // Project handling
     void setEdit (std::unique_ptr<te::Edit>, const juce::File& file);
@@ -35,6 +36,8 @@ private:
     void setPianoRollVisible (bool);
     void setMixerVisible (bool);
     void exportAudioFromChooser();
+    void askForText (const juce::String& title, const juce::String& message, const juce::String& initial,
+                     std::function<void (juce::String)> done);
     void newEmptyProject();
     void openProjectFile (const juce::File&);
     void chooseAndOpenProject();
