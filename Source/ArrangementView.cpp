@@ -86,7 +86,7 @@ int ArrangementView::rowHeight (int trackIndex) const
     auto tracks = te::getAudioTracks (edit);
 
     if (juce::isPositiveAndBelow (trackIndex, tracks.size()))
-        return trackHeight + autoRows (*tracks[trackIndex]) * autoLaneHeight + compRows (*tracks[trackIndex]) * compLaneHeight;
+        return trackHeight + autoRowsHeight (*tracks[trackIndex]) + compRows (*tracks[trackIndex]) * compLaneHeight;
 
     return trackHeight;
 }
@@ -134,6 +134,29 @@ te::WaveAudioClip* ArrangementView::compClipFor (te::AudioTrack& t) const
 }
 
 int ArrangementView::autoRows (te::AudioTrack& t) const    { return isExpanded (t) ? (int) expandedLanes (t).size() : 0; }
+
+int ArrangementView::autoRowsHeight (te::AudioTrack& t) const
+{
+    int h = 0;
+    if (isExpanded (t))
+        for (auto& l : expandedLanes (t))
+            h += laneH (l.param);
+    return h;
+}
+
+int ArrangementView::laneAt (te::AudioTrack& t, int rel, int& laneTop) const
+{
+    int y = 0, k = 0;
+    if (rel >= 0 && isExpanded (t))
+        for (auto& l : expandedLanes (t))
+        {
+            const int h = laneH (l.param);
+            if (rel < y + h) { laneTop = y; return k; }
+            y += h;
+            ++k;
+        }
+    return -1;
+}
 
 int ArrangementView::compRows (te::AudioTrack& t) const
 {
@@ -232,7 +255,7 @@ std::vector<ArrangementView::ExpandedLane> ArrangementView::expandedLanes (te::A
     std::vector<ExpandedLane> lanes;
     auto add = [this, &lanes] (te::AutomatableParameter* p, const juce::String& label)
     {
-        if (p == nullptr || hiddenLanes.count (p) > 0)
+        if (p == nullptr)
             return;
         for (auto& l : lanes)
             if (l.param == p)
@@ -451,12 +474,21 @@ void ArrangementView::paintClips (juce::Graphics& g, juce::Rectangle<int> lanes)
             int y = trackY (i) + trackHeight;
             for (auto& l : expandedLanes (*tracks[i]))
             {
-                paintAutomationLane (g, *l.param, { headerWidth, y, getWidth() - headerWidth, autoLaneHeight }, l.label);
-                y += autoLaneHeight;
+                const int h = laneH (l.param);
+                if (h == collapsedLaneHeight)
+                {
+                    g.setColour (juce::Colours::black.withAlpha (0.2f));
+                    g.fillRect (headerWidth, y, getWidth() - headerWidth, h);
+                    g.setColour (juce::Colours::white.withAlpha (0.45f));
+                    g.drawHorizontalLine (y + h - 1, (float) headerWidth, (float) getWidth());
+                }
+                else
+                    paintAutomationLane (g, *l.param, { headerWidth, y, getWidth() - headerWidth, h }, l.label);
+                y += h;
             }
         }
 
-        paintCompLanes (g, *tracks[i], trackY (i) + trackHeight + autoRows (*tracks[i]) * autoLaneHeight);
+        paintCompLanes (g, *tracks[i], trackY (i) + trackHeight + autoRowsHeight (*tracks[i]));
     }
 }
 
@@ -736,20 +768,26 @@ void ArrangementView::paintHeaders (juce::Graphics& g)
             int ly = trackY (i) + trackHeight;
             for (auto& l : expandedLanes (*t))
             {
+                const int lh = laneH (l.param);
+                const bool collapsed = lh == collapsedLaneHeight;
                 g.setColour (juce::Colours::black.withAlpha (0.25f));
-                g.fillRect (4, ly, headerWidth - 4, autoLaneHeight);
+                g.fillRect (4, ly, headerWidth - 4, lh);
                 g.setColour (juce::Colours::white.withAlpha (0.45f));
-                g.drawHorizontalLine (ly + autoLaneHeight - 1, 0.0f, (float) headerWidth);
-                g.setColour (Palette::textDim);
+                g.drawHorizontalLine (ly + lh - 1, 0.0f, (float) headerWidth);
+                g.setColour (collapsed ? Palette::textDim.withAlpha (0.7f) : Palette::textDim);
                 g.setFont (juce::FontOptions (11.0f));
                 g.drawText (l.label, 10, ly + 2, headerWidth - 40, 16, juce::Justification::centredLeft, true);
 
-                auto hb = juce::Rectangle<float> ((float) headerWidth - 24.0f, (float) ly + 3.0f, 16.0f, 16.0f);
+                auto hb = juce::Rectangle<float> ((float) headerWidth - 24.0f, (float) ly + 2.0f, 16.0f, 16.0f);
                 g.setColour (Palette::background);
                 g.fillRoundedRectangle (hb, 3.0f);
+                juce::Path chevron;
+                const auto cx = hb.getCentreX(), cy = hb.getCentreY();
+                if (collapsed)  chevron.addTriangle (cx - 2.0f, cy - 4.0f, cx - 2.0f, cy + 4.0f, cx + 3.0f, cy);
+                else            chevron.addTriangle (cx - 4.0f, cy - 2.0f, cx + 4.0f, cy - 2.0f, cx, cy + 3.0f);
                 g.setColour (Palette::textDim);
-                g.drawLine (hb.getX() + 4.0f, hb.getCentreY(), hb.getRight() - 4.0f, hb.getCentreY(), 1.5f);   // "hide lane"
-                ly += autoLaneHeight;
+                g.fillPath (chevron);
+                ly += lh;
             }
         }
 
@@ -825,12 +863,14 @@ void ArrangementView::headerClicked (const juce::MouseEvent& e)
 
     if (isExpanded (*t) && e.x >= headerWidth - 28)
     {
+        int top = 0;
         const int rel = e.y - trackY (index) - trackHeight;
-        auto lanes = expandedLanes (*t);
-        const int k = rel >= 0 ? rel / autoLaneHeight : -1;
-        if (juce::isPositiveAndBelow (k, (int) lanes.size()) && rel % autoLaneHeight < 22)
+        const int k = laneAt (*t, rel, top);
+        if (k >= 0 && rel - top < 22)
         {
-            hiddenLanes.insert (lanes[(size_t) k].param);
+            auto* param = expandedLanes (*t)[(size_t) k].param;
+            if (hiddenLanes.erase (param) == 0)
+                hiddenLanes.insert (param);
             repaint();
             return;
         }
@@ -1630,8 +1670,8 @@ void ArrangementView::showPointMenu (te::AutomatableParameter& param, int index)
 void ArrangementView::showLaneMenu (te::AutomatableParameter& param)
 {
     juce::PopupMenu m;
-    m.addItem (1, "Hide this lane");
-    m.addItem (2, "Show hidden lanes (" + juce::String ((int) hiddenLanes.size()) + ")", ! hiddenLanes.empty());
+    m.addItem (1, "Collapse this lane");
+    m.addItem (2, "Expand all collapsed lanes (" + juce::String ((int) hiddenLanes.size()) + ")", ! hiddenLanes.empty());
     m.addItem (3, "Paste at playhead", ! autoClipboard.empty());
     m.addItem (4, "Clear all points in this lane", param.getCurve().getNumPoints() > 0);
 
@@ -1746,7 +1786,10 @@ void ArrangementView::mouseMove (const juce::MouseEvent& e)
         if (juce::isPositiveAndBelow (ti, tr.size()) && isExpanded (*tr[ti]))
         {
             const int rel = e.y - trackY (ti) - trackHeight;
-            if (rel >= 0 && rel < autoRows (*tr[ti]) * autoLaneHeight && (rel % autoLaneHeight) >= autoLaneHeight - 4)
+            int top = 0;
+            const int k = laneAt (*tr[ti], rel, top);
+            if (k >= 0 && rel - top >= laneH (expandedLanes (*tr[ti])[(size_t) k].param) - 4
+                && hiddenLanes.count (expandedLanes (*tr[ti])[(size_t) k].param) == 0)
             {
                 setMouseCursor (juce::MouseCursor::UpDownResizeCursor);
                 return;
@@ -1799,17 +1842,18 @@ void ArrangementView::mouseDown (const juce::MouseEvent& e)
 
             const int rel = e.y - trackY (index);
 
-            if (rel >= trackHeight && isExpanded (*tracks[index]) && rel < trackHeight + autoRows (*tracks[index]) * autoLaneHeight)
+            if (rel >= trackHeight && isExpanded (*tracks[index]) && rel < trackHeight + autoRowsHeight (*tracks[index]))
             {
                 auto lanes = expandedLanes (*tracks[index]);
-                const int k = (rel - trackHeight) / autoLaneHeight;
-                if (juce::isPositiveAndBelow (k, (int) lanes.size()))
+                int top = 0;
+                const int k = laneAt (*tracks[index], rel - trackHeight, top);
+                if (k >= 0 && hiddenLanes.count (lanes[(size_t) k].param) == 0)
                     automationMouseDown (e, *tracks[index], *lanes[(size_t) k].param,
-                                         { headerWidth, trackY (index) + trackHeight + k * autoLaneHeight, getWidth() - headerWidth, autoLaneHeight }, true);
+                                         { headerWidth, trackY (index) + trackHeight + top, getWidth() - headerWidth, autoLaneHeight }, true);
                 return;
             }
 
-            if (const int compStart = trackHeight + autoRows (*tracks[index]) * autoLaneHeight; rel >= compStart && compRows (*tracks[index]) > 0)
+            if (const int compStart = trackHeight + autoRowsHeight (*tracks[index]); rel >= compStart && compRows (*tracks[index]) > 0)
             {
                 compMouseDown (e, *tracks[index], (rel - compStart) / compLaneHeight);
                 return;

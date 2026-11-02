@@ -138,6 +138,10 @@ private:
     static constexpr int compLaneHeight = 22;
     te::WaveAudioClip* compClipFor (te::AudioTrack&) const;
     int autoRows (te::AudioTrack&) const;
+    static constexpr int collapsedLaneHeight = 20;
+    int laneH (te::AutomatableParameter* p) const       { return hiddenLanes.count (p) > 0 ? collapsedLaneHeight : autoLaneHeight; }
+    int autoRowsHeight (te::AudioTrack&) const;
+    int laneAt (te::AudioTrack&, int relToLanes, int& laneTop) const;
     int compRows (te::AudioTrack&) const;
     double timelineToCompTime (te::WaveAudioClip&, double beat) const;
     void paintCompLanes (juce::Graphics&, te::AudioTrack&, int y);
