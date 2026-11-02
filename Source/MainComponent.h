@@ -30,7 +30,7 @@ private:
     enum MenuIDs { newProject = 1, openProject, saveProject, saveProjectAs, importAudio, exportAudio, undo, redo,
                    addAudioTrack, addInstrumentTrack, addReturnTrack, deleteTrack, toggleAutomation,
                    toggleMixer, toggleBrowser, toggleLoop, toggleClick, trackPlugins,
-                   insertTempo, resetTempoMap, setTimeSig, insertTimeSig, togglePunch, masterPlugins, zoomFit, recoverAutosave, importMidi, expandAutomation, recentBase = 1000 };
+                   insertTempo, resetTempoMap, setTimeSig, insertTimeSig, togglePunch, masterPlugins, zoomFit, recoverAutosave, importMidi, expandAutomation, editShortcuts, recentBase = 1000 };
 
     // Project handling
     void setEdit (std::unique_ptr<te::Edit>, const juce::File& file);
@@ -58,6 +58,16 @@ private:
     int autosaveTicks = 0;
     juce::PropertiesFile& settings();
     std::unique_ptr<juce::PropertiesFile> settingsFile;
+
+    // Rebindable keyboard shortcuts (stored in the settings file; defaults live in MainComponent.cpp)
+    struct Binding { int menuID; juce::String name; juce::KeyPress key, defaultKey; };
+    std::vector<Binding> bindings;
+    void loadBindings();
+    void saveBindings();
+    juce::String shortcutText (int menuID) const;
+    void showShortcutEditor();
+    class ShortcutEditor;
+    std::unique_ptr<juce::DialogWindow> shortcutDialog;
 
     // MenuBarModel
     juce::StringArray getMenuBarNames() override;

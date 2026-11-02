@@ -5,6 +5,7 @@ static constexpr int numInitialTracks = 8;
 
 MainComponent::MainComponent()
 {
+    loadBindings();
     newEmptyProject();
 
     setWantsKeyboardFocus (true);
@@ -764,11 +765,11 @@ juce::PopupMenu MainComponent::getMenuForIndex (int index, const juce::String&)
 {
     juce::PopupMenu m;
 
-    auto add = [&m] (int id, const juce::String& name, const juce::String& shortcut)
+    auto add = [this, &m] (int id, const juce::String& name, const juce::String& shortcut)
     {
         juce::PopupMenu::Item item (name);
         item.setID (id);
-        item.shortcutKeyDescription = shortcut;
+        item.shortcutKeyDescription = shortcutText (id).isNotEmpty() ? shortcutText (id) : shortcut;
         m.addItem (item);
     };
 
@@ -826,6 +827,8 @@ juce::PopupMenu MainComponent::getMenuForIndex (int index, const juce::String&)
         add (expandAutomation, "Expand / Collapse All Automation", "shift + cmd + A");
         add (toggleLoop,  "Loop",              "cmd + L");
         add (toggleClick, "Metronome",         "cmd + K");
+        m.addSeparator();
+        add (editShortcuts, "Keyboard Shortcuts...", "");
     }
 
     return m;
@@ -896,6 +899,7 @@ void MainComponent::menuItemSelected (int id, int)
             if (auto* t = arrangement->selectedTrack())
                 PluginUI::showTrackMenu (engine, *t);
             break;
+        case editShortcuts: showShortcutEditor(); break;
         case insertTempo:
         {
             const auto pos = edit->getTransport().getPosition();
@@ -962,6 +966,218 @@ void MainComponent::menuItemSelected (int id, int)
 }
 
 //==============================================================================
+// Keyboard shortcut bindings
+
+static const std::vector<juce::String>& reservedKeyNames()
+{
+    // Handled outside the binding table (transport, piano roll and arrangement editing)
+    static const std::vector<juce::String> names { "spacebar", "return", "home", "escape", "cmd + R", "delete", "backspace",
+                                                   "cmd + C", "cmd + X", "cmd + V", "cmd + D" };
+    return names;
+}
+
+void MainComponent::loadBindings()
+{
+    const auto cmd = juce::ModifierKeys::commandModifier;
+    const auto shift = juce::ModifierKeys::shiftModifier;
+
+    struct D { int id; const char* name; juce::KeyPress key; };
+    const D defaults[] =
+    {
+        { newProject,          "New Project",              { 'n', cmd, 0 } },
+        { openProject,         "Open Project",             { 'o', cmd, 0 } },
+        { saveProject,         "Save",                     { 's', cmd, 0 } },
+        { saveProjectAs,       "Save As",                  { 's', cmd | shift, 0 } },
+        { importAudio,         "Import Audio",             { 'i', cmd, 0 } },
+        { exportAudio,         "Export Audio",             { 'e', cmd | shift, 0 } },
+        { addAudioTrack,       "Add Audio Track",          { 't', cmd, 0 } },
+        { addInstrumentTrack,  "Add Instrument Track",     { 't', cmd | shift, 0 } },
+        { toggleAutomation,    "Show/Hide Automation",     { 'a', cmd, 0 } },
+        { expandAutomation,    "Expand All Automation",    { 'a', cmd | shift, 0 } },
+        { toggleMixer,         "Show/Hide Mixer",          { 'm', cmd, 0 } },
+        { toggleBrowser,       "Show/Hide Browser",        { 'b', cmd, 0 } },
+        { toggleLoop,          "Loop",                     { 'l', cmd, 0 } },
+        { toggleClick,         "Metronome",                { 'k', cmd, 0 } },
+        { trackPlugins,        "Track Plug-ins",           { 'p', cmd, 0 } },
+        { togglePunch,         "Punch In/Out",             { 'p', cmd | shift, 0 } },
+        { zoomFit,             "Zoom to Fit",              { 'f', cmd | shift, 0 } },
+        { undo,                "Undo",                     { 'z', cmd, 0 } },
+        { redo,                "Redo",                     { 'z', cmd | shift, 0 } },
+    };
+
+    bindings.clear();
+
+    for (auto& d : defaults)
+    {
+        Binding b { d.id, d.name, d.key, d.key };
+        const auto saved = settings().getValue ("key_" + juce::String (d.id), "default");
+
+        if (saved == "none")
+            b.key = juce::KeyPress();
+        else if (saved != "default")
+            if (auto k = juce::KeyPress::createFromDescription (saved); k.isValid())
+                b.key = k;
+
+        bindings.push_back (b);
+    }
+}
+
+void MainComponent::saveBindings()
+{
+    for (auto& b : bindings)
+    {
+        const auto name = "key_" + juce::String (b.menuID);
+
+        if (b.key == b.defaultKey)             settings().removeValue (name);
+        else if (! b.key.isValid())            settings().setValue (name, "none");
+        else                                   settings().setValue (name, b.key.getTextDescription());
+    }
+
+    settings().saveIfNeeded();
+}
+
+juce::String MainComponent::shortcutText (int menuID) const
+{
+    for (auto& b : bindings)
+        if (b.menuID == menuID)
+            return b.key.isValid() ? b.key.getTextDescriptionWithIcons() : juce::String();
+
+    return {};
+}
+
+class MainComponent::ShortcutEditor : public juce::Component, private juce::ListBoxModel
+{
+public:
+    explicit ShortcutEditor (MainComponent& o) : owner (o)
+    {
+        list.setModel (this);
+        list.setRowHeight (24);
+        list.setWantsKeyboardFocus (false);
+        addAndMakeVisible (list);
+
+        status.setJustificationType (juce::Justification::centredLeft);
+        status.setText ("Select a command, then press the new key combination. Delete clears it, Esc cancels.", juce::dontSendNotification);
+        addAndMakeVisible (status);
+
+        reset.onClick = [this]
+        {
+            for (auto& b : owner.bindings)
+                b.key = b.defaultKey;
+            owner.saveBindings();
+            list.updateContent();
+            list.repaint();
+            status.setText ("All shortcuts reset to their defaults.", juce::dontSendNotification);
+        };
+        addAndMakeVisible (reset);
+        setWantsKeyboardFocus (true);
+        setSize (460, 520);
+    }
+
+    void resized() override
+    {
+        auto r = getLocalBounds().reduced (10);
+        auto bottom = r.removeFromBottom (28);
+        reset.setBounds (bottom.removeFromRight (140));
+        status.setBounds (bottom);
+        r.removeFromBottom (6);
+        list.setBounds (r);
+    }
+
+    bool keyPressed (const juce::KeyPress& key) override
+    {
+        const int row = list.getSelectedRow();
+        if (! juce::isPositiveAndBelow (row, (int) owner.bindings.size()))
+            return false;
+
+        auto& b = owner.bindings[(size_t) row];
+
+        if (key == juce::KeyPress::escapeKey)
+        {
+            list.deselectAllRows();
+            status.setText ("Cancelled.", juce::dontSendNotification);
+            return true;
+        }
+
+        if (key == juce::KeyPress::deleteKey || key == juce::KeyPress::backspaceKey)
+        {
+            b.key = juce::KeyPress();
+            finish (b, "Cleared the shortcut for " + b.name + ".");
+            return true;
+        }
+
+        if (! key.getModifiers().isAnyModifierKeyDown() && key.getKeyCode() < 32 && key.getKeyCode() != 0)
+            return true;
+
+        for (auto& name : reservedKeyNames())
+            if (juce::KeyPress::createFromDescription (name) == key)
+            {
+                status.setText (key.getTextDescription() + " is reserved (" + name + "). Try another key.", juce::dontSendNotification);
+                return true;
+            }
+
+        for (auto& other : owner.bindings)
+            if (&other != &b && other.key == key)
+            {
+                status.setText (key.getTextDescription() + " is already used by \"" + other.name + "\". Clear that one first.", juce::dontSendNotification);
+                return true;
+            }
+
+        b.key = key;
+        finish (b, b.name + " = " + key.getTextDescription());
+        return true;
+    }
+
+private:
+    void finish (Binding&, const juce::String& message)
+    {
+        owner.saveBindings();
+        status.setText (message, juce::dontSendNotification);
+        list.deselectAllRows();
+        list.repaint();
+    }
+
+    int getNumRows() override { return (int) owner.bindings.size(); }
+
+    void paintListBoxItem (int row, juce::Graphics& g, int w, int h, bool selected) override
+    {
+        if (! juce::isPositiveAndBelow (row, (int) owner.bindings.size()))
+            return;
+
+        auto& b = owner.bindings[(size_t) row];
+        g.fillAll (selected ? Palette::accent.withAlpha (0.35f) : juce::Colours::transparentBlack);
+        g.setColour (juce::Colours::white.withAlpha (0.9f));
+        g.setFont (14.0f);
+        g.drawText (b.name, 8, 0, w - 180, h, juce::Justification::centredLeft);
+        g.setColour (selected ? juce::Colours::white : Palette::accent);
+        g.drawText (selected ? "press a key..." : (b.key.isValid() ? b.key.getTextDescriptionWithIcons() : "-"), w - 170, 0, 160, h,
+                    juce::Justification::centredRight);
+    }
+
+    void selectedRowsChanged (int row) override
+    {
+        if (row >= 0)
+            grabKeyboardFocus();
+    }
+
+    MainComponent& owner;
+    juce::ListBox list;
+    juce::Label status;
+    juce::TextButton reset { "Reset All" };
+};
+
+void MainComponent::showShortcutEditor()
+{
+    juce::DialogWindow::LaunchOptions o;
+    o.content.setOwned (new ShortcutEditor (*this));
+    o.dialogTitle = "Keyboard Shortcuts";
+    o.dialogBackgroundColour = juce::Colour (0xff22262b);
+    o.escapeKeyTriggersCloseButton = false;
+    o.useNativeTitleBar = true;
+    o.resizable = false;
+    o.launchAsync();
+}
+
+//==============================================================================
 // Keyboard
 
 bool MainComponent::keyPressed (const juce::KeyPress& key)
@@ -995,35 +1211,11 @@ bool MainComponent::keyPressed (const juce::KeyPress& key)
         return true;
     }
 
-    struct Shortcut { juce::KeyPress key; int menuID; };
-
-    const Shortcut shortcuts[] =
+    for (auto& bnd : bindings)
     {
-        { { 'n', cmd, 0 },         newProject },
-        { { 'o', cmd, 0 },         openProject },
-        { { 's', cmd, 0 },         saveProject },
-        { { 's', cmd | shift, 0 }, saveProjectAs },
-        { { 'i', cmd, 0 },         importAudio },
-        { { 'e', cmd | shift, 0 }, exportAudio },
-        { { 't', cmd, 0 },         addAudioTrack },
-        { { 't', cmd | shift, 0 }, addInstrumentTrack },
-        { { 'a', cmd, 0 },         toggleAutomation },
-        { { 'a', cmd | shift, 0 }, expandAutomation },
-        { { 'm', cmd, 0 },         toggleMixer },
-        { { 'b', cmd, 0 },         toggleBrowser },
-        { { 'l', cmd, 0 },         toggleLoop },
-        { { 'k', cmd, 0 },         toggleClick },
-        { { 'p', cmd, 0 },         trackPlugins },
-        { { 'p', cmd | shift, 0 }, togglePunch },
-        { { 'z', cmd, 0 },         undo },
-        { { 'z', cmd | shift, 0 }, redo },
-    };
-
-    for (auto& s : shortcuts)
-    {
-        if (key == s.key)
+        if (bnd.key.isValid() && key == bnd.key)
         {
-            menuItemSelected (s.menuID, 0);
+            menuItemSelected (bnd.menuID, 0);
             return true;
         }
     }

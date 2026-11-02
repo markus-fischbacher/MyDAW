@@ -45,6 +45,12 @@ Optional args: a `.tracktionedit` project to open, audio files (placed on consec
 | Automate any plug-in parameter | Show automation (A), then click the Vol/Pan/FX button to pick a parameter |
 | MP3 export | Shown in the export dialog when the `lame` encoder is installed (e.g. `brew install lame`) |
 | Expand all automation lanes | Shift+Cmd+A (View menu), or per track via the header right-click menu; shows volume, pan and every plug-in parameter that has automation |
+| Resize / hide automation lanes | Drag the bottom edge of an expanded lane; right-click a lane for Hide / Show hidden lanes |
+| Automation curve shapes | Right-click a point: Linear, Ease in, Ease out, Hold, Delete |
+| Automation range copy/paste | Shift+drag in a lane to select, Cmd+C / Cmd+X / Delete, Cmd+V pastes at the playhead |
+| Swipe comping | Track header menu: Show / Hide Take Lanes, select a clip with takes, drag across a take lane to use it for that range |
+| Edit tempo / time-signature markers | Double-click a marker in the ruler, or right-click the ruler (edit, move to playhead, delete, add) |
+| Rebind shortcuts | View menu > Keyboard Shortcuts... (conflicts are rejected) |
 | Scroll | Trackpad / wheel (Shift = horizontal) |
 | Locate | Click/drag in ruler |
 | Set loop range | Drag in the lower half of the ruler ("drag here to set loop"); drag its edges to resize, its body to move, click it to toggle looping; Cmd+L also toggles |

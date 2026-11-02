@@ -60,7 +60,7 @@ public:
     std::function<juce::File()> getDraggedBrowserFile;
 
 private:
-    enum class DragMode { none, scrub, move, trimStart, trimEnd, automation, loopRange, fadeIn, fadeOut, loopStart, loopEnd, loopMove };
+    enum class DragMode { none, scrub, move, trimStart, trimEnd, automation, loopRange, fadeIn, fadeOut, loopStart, loopEnd, loopMove, laneResize, autoSelect, compSwipe };
 
     struct ClipHit
     {
@@ -68,7 +68,7 @@ private:
         DragMode mode = DragMode::none;
     };
 
-    static constexpr int headerWidth = 170, rulerHeight = 28, trackHeight = 84, clipHeaderHeight = 16, edgeGrabWidth = 6, autoLaneHeight = 60, loopBarTop = 14;
+    static constexpr int headerWidth = 170, rulerHeight = 28, trackHeight = 84, clipHeaderHeight = 16, edgeGrabWidth = 6, loopBarTop = 14;
 
     // Coordinate mapping
     double beatToX (double beat) const;
@@ -76,6 +76,7 @@ private:
     double timeToX (te::TimePosition) const;
     te::TimePosition beatToTime (double beat) const;
     double timeToBeat (te::TimePosition) const;
+    te::TimePosition xToTime (double x) const;
     int trackY (int trackIndex) const;
     int rowHeight (int trackIndex) const;
     int totalTracksHeight() const;
@@ -86,6 +87,9 @@ private:
     double barToBeat (int bar) const;
     int beatToBar (double beat) const;
     void showRulerMenu (const juce::MouseEvent&);
+    void editTempoMarker (int index);
+    void editSigMarker (int index);
+    bool markerAt (int x, int& tempoIndex, int& sigIndex) const;
     void showClipMenu (te::EditItemID);
     void duplicateSelectedClip();
     void crossfadeIntoNext (te::Clip&);
@@ -122,7 +126,27 @@ private:
     int hitTestAutoPoint (te::AutomatableParameter&, juce::Rectangle<int> lane, juce::Point<int>) const;
     void paintAutomationLane (juce::Graphics&, te::AutomatableParameter&, juce::Rectangle<int> lane, const juce::String& label);
     void paintAutomation (juce::Graphics&, te::AudioTrack&, int trackIndex);
-    void automationMouseDown (const juce::MouseEvent&, te::AudioTrack&, te::AutomatableParameter&, juce::Rectangle<int> lane);
+    void automationMouseDown (const juce::MouseEvent&, te::AudioTrack&, te::AutomatableParameter&, juce::Rectangle<int> lane, bool extraLane);
+    bool isLiveLane (te::AutomatableParameter*) const;
+    void copyAutoSelection (bool cut);
+    void pasteAuto();
+    void deleteAutoSelection();
+    void showPointMenu (te::AutomatableParameter&, int index);
+
+    // Swipe comping: one thin lane per take under the selected clip
+    static constexpr int compLaneHeight = 22;
+    te::WaveAudioClip* compClipFor (te::AudioTrack&) const;
+    int autoRows (te::AudioTrack&) const;
+    int compRows (te::AudioTrack&) const;
+    double timelineToCompTime (te::WaveAudioClip&, double beat) const;
+    void paintCompLanes (juce::Graphics&, te::AudioTrack&, int y);
+    void commitSwipe();
+    void compMouseDown (const juce::MouseEvent&, te::AudioTrack&, int take);
+    std::set<te::EditItemID> compTracks;
+    te::EditItemID swipeClipID;
+    int swipeTake = -1;
+    double swipeStartBeat = 0.0, swipeEndBeat = 0.0;
+    void showLaneMenu (te::AutomatableParameter&);
 
     void paintGrid (juce::Graphics&, juce::Rectangle<int> lanes);
     void paintClips (juce::Graphics&, juce::Rectangle<int> lanes);
@@ -155,6 +179,14 @@ private:
     void showAutomationParamMenu (te::AudioTrack&);
     std::map<te::EditItemID, int> automationParam;      // 0 = volume (default), 1 = pan
     int dragAutoIndex = -1;
+    int autoLaneHeight = 60;
+    std::set<te::AutomatableParameter*> hiddenLanes;
+    te::AutomatableParameter* selParam = nullptr;
+    te::AutomatableParameter* lastLaneParam = nullptr;
+    double selStartBeat = 0.0, selEndBeat = 0.0, selAnchorBeat = 0.0;
+    int resizeStartY = 0, resizeStartHeight = 0;
+    struct ClipPoint { double beatOffset; float norm, curve; };
+    std::vector<ClipPoint> autoClipboard;
     te::AutomatableParameter* dragParam = nullptr;
     juce::Rectangle<int> dragLane;
     std::set<te::EditItemID> expandedTracks;

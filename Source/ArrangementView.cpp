@@ -76,12 +76,17 @@ te::TimePosition ArrangementView::beatToTime (double beat) const
     return edit.tempoSequence.toTime (te::BeatPosition::fromBeats (beat));
 }
 
+te::TimePosition ArrangementView::xToTime (double x) const
+{
+    return beatToTime (juce::jmax (0.0, xToBeat (x)));
+}
+
 int ArrangementView::rowHeight (int trackIndex) const
 {
     auto tracks = te::getAudioTracks (edit);
 
-    if (juce::isPositiveAndBelow (trackIndex, tracks.size()) && isExpanded (*tracks[trackIndex]))
-        return trackHeight + (int) expandedLanes (*tracks[trackIndex]).size() * autoLaneHeight;
+    if (juce::isPositiveAndBelow (trackIndex, tracks.size()))
+        return trackHeight + autoRows (*tracks[trackIndex]) * autoLaneHeight + compRows (*tracks[trackIndex]) * compLaneHeight;
 
     return trackHeight;
 }
@@ -116,12 +121,118 @@ int ArrangementView::yToTrackIndex (int y) const
     return n + (y - top) / trackHeight;
 }
 
+te::WaveAudioClip* ArrangementView::compClipFor (te::AudioTrack& t) const
+{
+    if (compTracks.count (t.itemID) == 0)
+        return nullptr;
+
+    if (auto* w = dynamic_cast<te::WaveAudioClip*> (te::findClipForID (edit, selectedClipID)))
+        if (w->getTrack() == &t && w->hasAnyTakes())
+            return w;
+
+    return nullptr;
+}
+
+int ArrangementView::autoRows (te::AudioTrack& t) const    { return isExpanded (t) ? (int) expandedLanes (t).size() : 0; }
+
+int ArrangementView::compRows (te::AudioTrack& t) const
+{
+    if (auto* w = compClipFor (t))
+        return w->getCompManager().getTotalNumTakes();
+
+    return 0;
+}
+
+double ArrangementView::timelineToCompTime (te::WaveAudioClip& w, double beat) const
+{
+    const auto pos = w.getPosition();
+    const double secs = (beatToTime (beat) - pos.getStart()).inSeconds();
+    return (pos.getOffset().inSeconds() + secs) * w.getCompManager().getSpeedRatio();
+}
+
+void ArrangementView::paintCompLanes (juce::Graphics& g, te::AudioTrack& t, int y)
+{
+    auto* w = compClipFor (t);
+    if (w == nullptr)
+        return;
+
+    auto& cm = w->getCompManager();
+    const auto pos = w->getPosition();
+    const int x1 = (int) timeToX (pos.getStart()), x2 = (int) timeToX (pos.getEnd());
+    const int active = cm.getActiveTakeIndex();
+    const double speed = cm.getSpeedRatio();
+    auto toX = [&] (double compTime)
+    {
+        return timeToX (pos.getStart() + te::TimeDuration::fromSeconds (compTime / speed - pos.getOffset().inSeconds()));
+    };
+
+    for (int i = 0; i < cm.getTotalNumTakes(); ++i, y += compLaneHeight)
+    {
+        const auto r = juce::Rectangle<int> (x1, y + 1, x2 - x1, compLaneHeight - 2);
+        g.setColour (juce::Colours::black.withAlpha (0.35f));
+        g.fillRect (headerWidth, y, getWidth() - headerWidth, compLaneHeight);
+        g.setColour (Palette::clip.withAlpha (0.25f));
+        g.fillRect (r);
+
+        if (cm.isTakeComp (i))
+        {
+            // A comp lane shows which take each section uses
+            auto tree = cm.getTakesTree().getChild (i);
+            for (int k = 0; k < tree.getNumChildren(); ++k)
+            {
+                auto sec = tree.getChild (k);
+                auto times = cm.getSectionTimes (sec);
+                const int idx = sec[te::IDs::takeIndex];
+                const int sx = juce::jmax (x1, (int) toX (times.getStart())), ex = juce::jmin (x2, (int) toX (times.getEnd()));
+                g.setColour (Palette::accent.withAlpha (0.55f));
+                g.fillRect (sx, y + 1, ex - sx - 1, compLaneHeight - 2);
+                g.setColour (juce::Colours::white);
+                g.setFont (10.0f);
+                g.drawText (juce::String (idx + 1), sx + 2, y + 1, ex - sx - 4, compLaneHeight - 2, juce::Justification::centredLeft);
+            }
+        }
+        else if (i == active)
+        {
+            g.setColour (Palette::accent.withAlpha (0.55f));
+            g.fillRect (r);
+        }
+
+        g.setColour (juce::Colours::white.withAlpha (0.8f));
+        g.setFont (10.0f);
+        g.drawText (cm.getTakeName (i) + (i == active ? "  (active)" : ""), juce::jmax (headerWidth, x1) + 4, y, 160, compLaneHeight, juce::Justification::centredLeft);
+        g.setColour (juce::Colours::white.withAlpha (0.12f));
+        g.drawRect (r);
+    }
+
+    if (swipeTake >= 0 && swipeClipID == w->itemID)
+    {
+        const int sx = (int) beatToX (juce::jmin (swipeStartBeat, swipeEndBeat)), ex = (int) beatToX (juce::jmax (swipeStartBeat, swipeEndBeat));
+        const int sy = y - (cm.getTotalNumTakes() - swipeTake) * compLaneHeight;
+        g.setColour (juce::Colours::white.withAlpha (0.35f));
+        g.fillRect (sx, sy + 1, ex - sx, compLaneHeight - 2);
+    }
+}
+
+void ArrangementView::compMouseDown (const juce::MouseEvent& e, te::AudioTrack& t, int take)
+{
+    auto* w = compClipFor (t);
+    if (w == nullptr)
+        return;
+
+    swipeClipID = w->itemID;
+    swipeTake = take;
+    swipeStartBeat = swipeEndBeat = snapBeat (xToBeat (e.x), e.mods.isAltDown());
+    dragMode = DragMode::compSwipe;
+    edit.getUndoManager().beginNewTransaction();
+    repaint();
+}
+
 std::vector<ArrangementView::ExpandedLane> ArrangementView::expandedLanes (te::AudioTrack& t) const
 {
     std::vector<ExpandedLane> lanes;
-    auto add = [&lanes] (te::AutomatableParameter* p, const juce::String& label)
+    auto add = [this, &lanes] (te::AutomatableParameter* p, const juce::String& label)
     {
-        if (p == nullptr)
+        if (p == nullptr || hiddenLanes.count (p) > 0)
             return;
         for (auto& l : lanes)
             if (l.param == p)
@@ -344,6 +455,8 @@ void ArrangementView::paintClips (juce::Graphics& g, juce::Rectangle<int> lanes)
                 y += autoLaneHeight;
             }
         }
+
+        paintCompLanes (g, *tracks[i], trackY (i) + trackHeight + autoRows (*tracks[i]) * autoLaneHeight);
     }
 }
 
@@ -693,6 +806,7 @@ void ArrangementView::showTrackMenu (int trackIndex)
     m.addItem (5, "Freeze Track (Bounce to New Track)", trackIndex >= 0);
     m.addItem (6, "Show / Hide All Automation Lanes", trackIndex >= 0);
     m.addItem (7, "Show / Hide Automation for All Tracks");
+    m.addItem (8, "Show / Hide Take Lanes (comping, selected clip)", trackIndex >= 0);
 
     m.showMenuAsync ({}, [this, trackIndex] (int r)
     {
@@ -721,36 +835,141 @@ void ArrangementView::showTrackMenu (int trackIndex)
                 repaint();
                 break;
             case 7: toggleExpandAllAutomation(); break;
+            case 8:
+                if (auto* t = te::getAudioTracks (edit)[trackIndex])
+                {
+                    if (! compTracks.erase (t->itemID))
+                        compTracks.insert (t->itemID);
+                    repaint();
+                }
+                break;
             default: break;
         }
     });
 }
 
-void ArrangementView::showRulerMenu (const juce::MouseEvent& e)
+static void askText (const juce::String& title, const juce::String& initial, std::function<void (juce::String)> done);
+
+void ArrangementView::editTempoMarker (int index)
+{
+    auto* tempo = edit.tempoSequence.getTempo (index);
+    if (tempo == nullptr)
+        return;
+
+    askText ("Tempo (BPM)", juce::String (tempo->getBpm(), 2), [this, index] (juce::String text)
+    {
+        const double bpm = text.getDoubleValue();
+        if (bpm < 20.0 || bpm > 400.0 || edit.tempoSequence.getTempo (index) == nullptr)
+            return;
+        edit.getUndoManager().beginNewTransaction();
+        edit.tempoSequence.getTempo (index)->setBpm (bpm);
+        repaint();
+    });
+}
+
+void ArrangementView::editSigMarker (int index)
+{
+    auto* ts = edit.tempoSequence.getTimeSig (index);
+    if (ts == nullptr)
+        return;
+
+    askText ("Time signature (e.g. 7/8)", ts->getStringTimeSig(), [this, index] (juce::String text)
+    {
+        if (! text.containsChar ('/') || edit.tempoSequence.getTimeSig (index) == nullptr)
+            return;
+        edit.getUndoManager().beginNewTransaction();
+        edit.tempoSequence.getTimeSig (index)->setStringTimeSig (text.trim());
+        repaint();
+    });
+}
+
+bool ArrangementView::markerAt (int x, int& tempoIndex, int& sigIndex) const
 {
     auto& seq = edit.tempoSequence;
-    int tempoIndex = -1, sigIndex = -1;
+    tempoIndex = sigIndex = -1;
 
     for (int i = 1; i < seq.getNumTempos(); ++i)
-        if (std::abs (timeToX (seq.getTempo (i)->getStartTime()) - e.x) <= 8.0)
+        if (std::abs (timeToX (seq.getTempo (i)->getStartTime()) - x) <= 8.0)
             tempoIndex = i;
 
     for (int i = 1; i < seq.getTimeSigs().size(); ++i)
-        if (std::abs (beatToX (seq.getTimeSig (i)->startBeatNumber.get().inBeats()) - e.x) <= 8.0)
+        if (std::abs (beatToX (seq.getTimeSig (i)->startBeatNumber.get().inBeats()) - x) <= 8.0)
             sigIndex = i;
 
-    if (tempoIndex < 0 && sigIndex < 0)
-        return;
+    return tempoIndex >= 0 || sigIndex >= 0;
+}
+
+void ArrangementView::showRulerMenu (const juce::MouseEvent& e)
+{
+    auto& seq = edit.tempoSequence;
+    int tempoIndex, sigIndex;
+    markerAt (e.x, tempoIndex, sigIndex);
+
+    const double clickBeat = juce::jmax (0.0, snapBeat (xToBeat (e.x), false));
 
     juce::PopupMenu m;
-    if (tempoIndex >= 0) m.addItem (1, "Delete Tempo Change (" + juce::String (seq.getTempo (tempoIndex)->getBpm(), 1) + " BPM)");
-    if (sigIndex >= 0)   m.addItem (2, "Delete Time Signature Change (" + seq.getTimeSig (sigIndex)->getStringTimeSig() + ")");
-
-    m.showMenuAsync ({}, [this, tempoIndex, sigIndex] (int r)
+    if (tempoIndex >= 0)
     {
-        edit.getUndoManager().beginNewTransaction();
-        if (r == 1)      edit.tempoSequence.removeTempo (tempoIndex, false);
-        else if (r == 2) edit.tempoSequence.removeTimeSig (sigIndex);
+        m.addItem (1, "Edit Tempo (" + juce::String (seq.getTempo (tempoIndex)->getBpm(), 1) + " BPM)...");
+        m.addItem (3, "Move Tempo Change to Playhead");
+        m.addItem (5, "Delete Tempo Change");
+    }
+    if (sigIndex >= 0)
+    {
+        m.addItem (2, "Edit Time Signature (" + seq.getTimeSig (sigIndex)->getStringTimeSig() + ")...");
+        m.addItem (6, "Delete Time Signature Change");
+    }
+    if (! m.containsAnyActiveItems() || tempoIndex < 0 || sigIndex < 0)
+    {
+        m.addSeparator();
+        m.addItem (7, "Add Tempo Change Here...");
+        m.addItem (8, "Add Time Signature Change Here...");
+    }
+
+    m.showMenuAsync ({}, [this, tempoIndex, sigIndex, clickBeat] (int r)
+    {
+        auto& s = edit.tempoSequence;
+        if (r == 1)       editTempoMarker (tempoIndex);
+        else if (r == 2)  editSigMarker (sigIndex);
+        else if (r == 3)
+        {
+            edit.getUndoManager().beginNewTransaction();
+            const auto b = s.toBeats (edit.getTransport().getPosition());
+            if (b.inBeats() > 0.0)
+                s.getTempo (tempoIndex)->setStartBeat (b);
+        }
+        else if (r == 5 || r == 6)
+        {
+            edit.getUndoManager().beginNewTransaction();
+            if (r == 5)  s.removeTempo (tempoIndex, false);
+            else         s.removeTimeSig (sigIndex);
+        }
+        else if (r == 7 && clickBeat > 0.0)
+        {
+            askText ("New tempo (BPM)", juce::String (s.getBpmAt (beatToTime (clickBeat)), 2), [this, clickBeat] (juce::String text)
+            {
+                const double bpm = text.getDoubleValue();
+                if (bpm < 20.0 || bpm > 400.0)
+                    return;
+                edit.getUndoManager().beginNewTransaction();
+                edit.tempoSequence.insertTempo (te::BeatPosition::fromBeats (clickBeat), bpm, 1.0f);
+                repaint();
+            });
+        }
+        else if (r == 8 && clickBeat > 0.0)
+        {
+            const int bar = beatToBar (clickBeat);
+            askText ("Time signature from bar " + juce::String (bar + 1), "4/4", [this, bar] (juce::String text)
+            {
+                if (! text.containsChar ('/'))
+                    return;
+                edit.getUndoManager().beginNewTransaction();
+                auto start = edit.tempoSequence.toBeats (te::tempo::BarsAndBeats { bar, te::BeatDuration() });
+                if (auto ts = edit.tempoSequence.insertTimeSig (start))
+                    ts->setStringTimeSig (text.trim());
+                repaint();
+            });
+        }
         repaint();
     });
 }
@@ -1093,6 +1312,13 @@ void ArrangementView::paintAutomationLane (juce::Graphics& g, te::AutomatablePar
     auto& curve = p->getCurve();
     const int n = curve.getNumPoints();
 
+    if (p == selParam && selEndBeat > selStartBeat)
+    {
+        const int sx1 = (int) beatToX (selStartBeat), sx2 = (int) beatToX (selEndBeat);
+        g.setColour (Palette::accent.withAlpha (0.18f));
+        g.fillRect (juce::Rectangle<int> (sx1, lane.getY(), sx2 - sx1, lane.getHeight() - 1));
+    }
+
     juce::Path path;
     if (n == 0)
     {
@@ -1102,11 +1328,14 @@ void ArrangementView::paintAutomationLane (juce::Graphics& g, te::AutomatablePar
     }
     else
     {
-        const float firstY = autoValueToY (*p, curve.getPointValue (0), lane);
-        path.startNewSubPath ((float) lane.getX(), firstY);
-        for (int i = 0; i < n; ++i)
-            path.lineTo ((float) timeToX (curve.getPointTime (i)), autoValueToY (*p, curve.getPointValue (i), lane));
-        path.lineTo ((float) lane.getRight(), autoValueToY (*p, curve.getPointValue (n - 1), lane));
+        bool first = true;
+        for (int x = lane.getX(); x <= lane.getRight(); x += 3)
+        {
+            const float v = curve.getValueAt (xToTime ((double) x), p->getCurrentValue());
+            const float y = autoValueToY (*p, v, lane);
+            if (first)  { path.startNewSubPath ((float) x, y); first = false; }
+            else        path.lineTo ((float) x, y);
+        }
     }
 
     g.setColour (Palette::accent);
@@ -1124,29 +1353,53 @@ void ArrangementView::paintAutomationLane (juce::Graphics& g, te::AutomatablePar
 }
 
 void ArrangementView::automationMouseDown (const juce::MouseEvent& e, te::AudioTrack& t, te::AutomatableParameter& param,
-                                           juce::Rectangle<int> lane)
+                                           juce::Rectangle<int> lane, bool extraLane)
 {
     auto* p = &param;
-
     auto& curve = p->getCurve();
     auto& um = edit.getUndoManager();
     um.beginNewTransaction();
+    lastLaneParam = p;
+
+    if (extraLane && e.y >= lane.getBottom() - 4 && ! e.mods.isPopupMenu())
+    {
+        dragMode = DragMode::laneResize;
+        resizeStartY = e.y;
+        resizeStartHeight = autoLaneHeight;
+        return;
+    }
 
     const int hit = hitTestAutoPoint (*p, lane, e.getPosition());
 
-    if (hit >= 0 && (e.mods.isPopupMenu() || e.mods.isAltDown()))
+    if (e.mods.isPopupMenu())
+    {
+        if (hit >= 0)   showPointMenu (*p, hit);
+        else            showLaneMenu (*p);
+        return;
+    }
+
+    if (hit >= 0 && e.mods.isAltDown())
     {
         curve.removePoint (hit, &um);
         repaint();
         return;
     }
 
-    if (e.mods.isPopupMenu())
-        return;
-
     dragAutoTrack = t.itemID;
     dragParam = p;
     dragLane = lane;
+
+    if (hit < 0 && e.mods.isShiftDown())
+    {
+        dragMode = DragMode::autoSelect;
+        selParam = p;
+        selAnchorBeat = juce::jmax (0.0, snapBeat (xToBeat (e.x), false));
+        selStartBeat = selEndBeat = selAnchorBeat;
+        repaint();
+        return;
+    }
+
+    selParam = nullptr;
 
     if (hit >= 0)
     {
@@ -1160,6 +1413,129 @@ void ArrangementView::automationMouseDown (const juce::MouseEvent& e, te::AudioT
 
     dragMode = DragMode::automation;
     repaint();
+}
+
+bool ArrangementView::isLiveLane (te::AutomatableParameter* p) const
+{
+    if (p == nullptr)
+        return false;
+
+    for (auto* t : te::getAudioTracks (edit))
+    {
+        if (getAutoParam (*t) == p && automationTracks.count (t->itemID) > 0)
+            return true;
+
+        for (auto& l : expandedLanes (*t))
+            if (l.param == p && isExpanded (*t))
+                return true;
+    }
+
+    return false;
+}
+
+void ArrangementView::copyAutoSelection (bool cut)
+{
+    if (! isLiveLane (selParam) || selEndBeat <= selStartBeat)
+        return;
+
+    autoClipboard.clear();
+    auto& curve = selParam->getCurve();
+    const auto range = selParam->getValueRange();
+
+    for (int i = 0; i < curve.getNumPoints(); ++i)
+    {
+        const double b = timeToBeat (curve.getPointTime (i));
+        if (b >= selStartBeat - 1.0e-6 && b <= selEndBeat + 1.0e-6)
+            autoClipboard.push_back ({ b - selStartBeat, (curve.getPointValue (i) - range.getStart()) / range.getLength(),
+                                       curve.getPointCurve (i) });
+    }
+
+    if (cut)
+        deleteAutoSelection();
+}
+
+void ArrangementView::deleteAutoSelection()
+{
+    if (! isLiveLane (selParam) || selEndBeat <= selStartBeat)
+        return;
+
+    edit.getUndoManager().beginNewTransaction();
+    selParam->getCurve().removePointsInRegion ({ beatToTime (selStartBeat - 1.0e-6), beatToTime (selEndBeat + 1.0e-6) }, &edit.getUndoManager());
+    repaint();
+}
+
+void ArrangementView::pasteAuto()
+{
+    auto* target = isLiveLane (selParam) ? selParam : lastLaneParam;
+
+    if (autoClipboard.empty() || ! isLiveLane (target))
+        return;
+
+    auto& um = edit.getUndoManager();
+    um.beginNewTransaction();
+    const double at = timeToBeat (edit.getTransport().getPosition());
+    const auto range = target->getValueRange();
+    const double span = autoClipboard.back().beatOffset;
+
+    target->getCurve().removePointsInRegion ({ beatToTime (at - 1.0e-6), beatToTime (at + span + 1.0e-6) }, &um);
+
+    for (auto& pt : autoClipboard)
+        target->getCurve().addPoint (beatToTime (at + pt.beatOffset), range.getStart() + pt.norm * range.getLength(), pt.curve, &um);
+
+    selParam = target;
+    selStartBeat = at;
+    selEndBeat = at + span;
+    repaint();
+}
+
+void ArrangementView::showPointMenu (te::AutomatableParameter& param, int index)
+{
+    juce::PopupMenu m;
+    m.addItem (1, "Linear");
+    m.addItem (2, "Ease in (slow start)");
+    m.addItem (3, "Ease out (slow end)");
+    m.addItem (4, "Hold (step)");
+    m.addSeparator();
+    m.addItem (5, "Delete point");
+
+    auto* p = &param;
+    m.showMenuAsync ({}, [this, p, index] (int r)
+    {
+        if (r == 0 || ! isLiveLane (p) || index >= p->getCurve().getNumPoints())
+            return;
+
+        auto& um = edit.getUndoManager();
+        um.beginNewTransaction();
+
+        if (r == 5)       p->getCurve().removePoint (index, &um);
+        else              p->getCurve().setCurveValue (index, r == 1 ? 0.0f : r == 2 ? 0.7f : r == 3 ? -0.7f : 1.0f, &um);
+
+        repaint();
+    });
+}
+
+void ArrangementView::showLaneMenu (te::AutomatableParameter& param)
+{
+    juce::PopupMenu m;
+    m.addItem (1, "Hide this lane");
+    m.addItem (2, "Show hidden lanes (" + juce::String ((int) hiddenLanes.size()) + ")", ! hiddenLanes.empty());
+    m.addItem (3, "Paste at playhead", ! autoClipboard.empty());
+    m.addItem (4, "Clear all points in this lane", param.getCurve().getNumPoints() > 0);
+
+    auto* p = &param;
+    m.showMenuAsync ({}, [this, p] (int r)
+    {
+        if (r == 1)       hiddenLanes.insert (p);
+        else if (r == 2)  hiddenLanes.clear();
+        else if (r == 3)  { lastLaneParam = p; selParam = nullptr; pasteAuto(); }
+        else if (r == 4 && isLiveLane (p))
+        {
+            edit.getUndoManager().beginNewTransaction();
+            p->getCurve().clear (&edit.getUndoManager());
+        }
+
+        repaint();
+    });
 }
 
 void ArrangementView::paintPlayhead (juce::Graphics& g)
@@ -1240,6 +1616,21 @@ void ArrangementView::mouseMove (const juce::MouseEvent& e)
         return;
     }
 
+    if (e.y >= rulerHeight && e.x >= headerWidth)
+    {
+        const int ti = yToTrackIndex (e.y);
+        auto tr = te::getAudioTracks (edit);
+        if (juce::isPositiveAndBelow (ti, tr.size()) && isExpanded (*tr[ti]))
+        {
+            const int rel = e.y - trackY (ti) - trackHeight;
+            if (rel >= 0 && rel < autoRows (*tr[ti]) * autoLaneHeight && (rel % autoLaneHeight) >= autoLaneHeight - 4)
+            {
+                setMouseCursor (juce::MouseCursor::UpDownResizeCursor);
+                return;
+            }
+        }
+    }
+
     switch (hitTestClip (e.getPosition()).mode)
     {
         case DragMode::trimStart:
@@ -1253,6 +1644,9 @@ void ArrangementView::mouseMove (const juce::MouseEvent& e)
         case DragMode::loopStart:
         case DragMode::loopEnd:
         case DragMode::loopMove:
+        case DragMode::laneResize:
+        case DragMode::autoSelect:
+        case DragMode::compSwipe:
         case DragMode::scrub:     setMouseCursor (juce::MouseCursor::NormalCursor); break;
     }
 }
@@ -1281,20 +1675,26 @@ void ArrangementView::mouseDown (const juce::MouseEvent& e)
 
             const int rel = e.y - trackY (index);
 
-            if (rel >= trackHeight && isExpanded (*tracks[index]))
+            if (rel >= trackHeight && isExpanded (*tracks[index]) && rel < trackHeight + autoRows (*tracks[index]) * autoLaneHeight)
             {
                 auto lanes = expandedLanes (*tracks[index]);
                 const int k = (rel - trackHeight) / autoLaneHeight;
                 if (juce::isPositiveAndBelow (k, (int) lanes.size()))
                     automationMouseDown (e, *tracks[index], *lanes[(size_t) k].param,
-                                         { headerWidth, trackY (index) + trackHeight + k * autoLaneHeight, getWidth() - headerWidth, autoLaneHeight });
+                                         { headerWidth, trackY (index) + trackHeight + k * autoLaneHeight, getWidth() - headerWidth, autoLaneHeight }, true);
+                return;
+            }
+
+            if (const int compStart = trackHeight + autoRows (*tracks[index]) * autoLaneHeight; rel >= compStart && compRows (*tracks[index]) > 0)
+            {
+                compMouseDown (e, *tracks[index], (rel - compStart) / compLaneHeight);
                 return;
             }
 
             if (automationTracks.count (tracks[index]->itemID) > 0)
             {
                 if (auto* p = getAutoParam (*tracks[index]))
-                    automationMouseDown (e, *tracks[index], *p, { headerWidth, trackY (index), getWidth() - headerWidth, trackHeight });
+                    automationMouseDown (e, *tracks[index], *p, { headerWidth, trackY (index), getWidth() - headerWidth, trackHeight }, false);
                 return;
             }
         }
@@ -1379,6 +1779,29 @@ void ArrangementView::mouseDown (const juce::MouseEvent& e)
 void ArrangementView::mouseDrag (const juce::MouseEvent& e)
 {
     const bool bypassSnap = e.mods.isAltDown();
+
+    if (dragMode == DragMode::compSwipe)
+    {
+        swipeEndBeat = snapBeat (xToBeat (e.x), e.mods.isAltDown());
+        repaint();
+        return;
+    }
+
+    if (dragMode == DragMode::laneResize)
+    {
+        autoLaneHeight = juce::jlimit (36, 240, resizeStartHeight + e.y - resizeStartY);
+        repaint();
+        return;
+    }
+
+    if (dragMode == DragMode::autoSelect)
+    {
+        const double b = juce::jmax (0.0, snapBeat (xToBeat (e.x), bypassSnap));
+        selStartBeat = juce::jmin (b, selAnchorBeat);
+        selEndBeat = juce::jmax (b, selAnchorBeat);
+        repaint();
+        return;
+    }
 
     if (dragMode == DragMode::automation)
     {
@@ -1507,14 +1930,81 @@ void ArrangementView::mouseDrag (const juce::MouseEvent& e)
         case DragMode::loopStart:
         case DragMode::loopEnd:
         case DragMode::loopMove:
+        case DragMode::laneResize:
+        case DragMode::autoSelect:
+        case DragMode::compSwipe:
             break;
     }
+}
+
+void ArrangementView::commitSwipe()
+{
+    auto* w = dynamic_cast<te::WaveAudioClip*> (te::findClipForID (edit, swipeClipID));
+    if (w == nullptr || swipeTake < 0)
+        return;
+
+    auto& cm = w->getCompManager();
+    const int take = swipeTake;
+
+    if (cm.isTakeComp (take))
+    {
+        cm.setActiveTakeIndex (take);        // clicking a comp lane just activates it
+        repaint();
+        return;
+    }
+
+    const bool click = std::abs (swipeEndBeat - swipeStartBeat) * pixelsPerBeat < 4.0;
+
+    if (! cm.isCurrentTakeComp())
+    {
+        if (click)
+        {
+            cm.setActiveTakeIndex (take);    // plain click on a take: audition that whole take
+            repaint();
+            return;
+        }
+
+        cm.addNewComp();                     // first swipe creates a comp and makes it active
+        cm.setActiveTakeIndex (cm.getTotalNumTakes() - 1);
+    }
+
+    const auto range = cm.getCompRange();
+    double a = timelineToCompTime (*w, juce::jmin (swipeStartBeat, swipeEndBeat));
+    double b = click ? range.getEnd() : timelineToCompTime (*w, juce::jmax (swipeStartBeat, swipeEndBeat));
+    a = juce::jlimit (range.getStart(), range.getEnd(), a);
+    b = juce::jlimit (range.getStart(), range.getEnd(), b);
+
+    if (b - a > 1.0e-4 || click)
+    {
+        if (a > range.getStart() + 1.0e-4)  cm.splitSectionAtTime (a);
+        if (b < range.getEnd() - 1.0e-4)    cm.splitSectionAtTime (b);
+
+        for (double t = a + 1.0e-4; t < b; )
+        {
+            cm.changeSectionIndexAtTime (t, take);
+            auto sec = cm.findSectionAtTime (t);
+            if (! sec.isValid())
+                break;
+            const double next = cm.getSectionTimes (sec).getEnd();
+            if (next <= t)
+                break;
+            t = next + 1.0e-4;
+        }
+    }
+
+    repaint();
 }
 
 void ArrangementView::mouseUp (const juce::MouseEvent&)
 {
     if (dragMode == DragMode::loopMove && ! loopMoved)     // a plain click on the loop bar toggles looping
         edit.getTransport().looping = ! edit.getTransport().looping.get();
+
+    if (dragMode == DragMode::compSwipe)
+    {
+        commitSwipe();
+        swipeTake = -1;
+    }
 
     dragAutoIndex = -1;
     dragMode = DragMode::none;
@@ -1523,6 +2013,17 @@ void ArrangementView::mouseUp (const juce::MouseEvent&)
 
 void ArrangementView::mouseDoubleClick (const juce::MouseEvent& e)
 {
+    if (e.y < rulerHeight && e.x >= headerWidth)
+    {
+        int ti, si;
+        if (markerAt (e.x, ti, si))
+        {
+            if (ti >= 0)  editTempoMarker (ti);
+            else          editSigMarker (si);
+        }
+        return;
+    }
+
     if (e.y >= rulerHeight && e.x < headerWidth)
     {
         if (e.y - trackY (yToTrackIndex (e.y)) < 30)
@@ -1537,7 +2038,7 @@ void ArrangementView::mouseDoubleClick (const juce::MouseEvent& e)
         auto tr = te::getAudioTracks (edit);
         const int ti = yToTrackIndex (e.y);
         if (juce::isPositiveAndBelow (ti, tr.size()) && (automationTracks.count (tr[ti]->itemID) > 0
-                                                         || (isExpanded (*tr[ti]) && e.y - trackY (ti) >= trackHeight)))
+                                                         || e.y - trackY (ti) >= trackHeight))
             return;
     }
 
@@ -1601,6 +2102,21 @@ void ArrangementView::mouseMagnify (const juce::MouseEvent& e, float scaleFactor
 
 bool ArrangementView::keyPressed (const juce::KeyPress& key)
 {
+    const auto cmd = juce::ModifierKeys::commandModifier;
+
+    if (isLiveLane (selParam) && selEndBeat > selStartBeat)
+    {
+        if (key == juce::KeyPress ('c', cmd, 0))  { copyAutoSelection (false); return true; }
+        if (key == juce::KeyPress ('x', cmd, 0))  { copyAutoSelection (true);  return true; }
+        if (key == juce::KeyPress::deleteKey || key == juce::KeyPress::backspaceKey) { deleteAutoSelection(); return true; }
+    }
+
+    if (key == juce::KeyPress ('v', cmd, 0) && ! autoClipboard.empty())
+    {
+        pasteAuto();
+        return true;
+    }
+
     auto* clip = getSelectedClip();
 
     if (clip != nullptr && (key == juce::KeyPress::deleteKey || key == juce::KeyPress::backspaceKey))
