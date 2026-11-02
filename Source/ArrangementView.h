@@ -24,11 +24,12 @@ public:
     /** Appends a track; instrument tracks get a synth so MIDI clips are audible. */
     void addTrack (bool instrument);
     void addReturnTrack();
-    void bounceToNewTrack (te::AudioTrack&, te::TimeRange, const juce::String& name, std::function<void()> muteOriginal);
+    void bounceToNewTrack (te::AudioTrack&, te::TimeRange, const juce::String& name, std::function<void()> muteOriginal, te::Clip* onlyClip = nullptr);
     void importMidiFile (const juce::File&, int trackIndex, te::TimePosition start);
     void exportMidiClip (te::MidiClip&);
     void zoomToFit();
     void consolidateClip (te::EditItemID);
+    void setupCompDemo (int trackIndex);
     void deleteSelectedTrack();
     bool hasSelectedTrack() const           { return getSelectedTrack() != nullptr; }
     void toggleAutomationOnSelectedTrack();
@@ -61,7 +62,7 @@ public:
     std::function<juce::File()> getDraggedBrowserFile;
 
 private:
-    enum class DragMode { none, scrub, move, trimStart, trimEnd, automation, loopRange, fadeIn, fadeOut, loopStart, loopEnd, loopMove, laneResize, autoSelect, compSwipe, markerMove };
+    enum class DragMode { none, scrub, move, trimStart, trimEnd, automation, loopRange, fadeIn, fadeOut, loopStart, loopEnd, loopMove, laneResize, autoSelect, compSwipe, markerMove, marquee };
 
     struct ClipHit
     {
@@ -147,6 +148,17 @@ private:
     void paintCompLanes (juce::Graphics&, te::AudioTrack&, int y);
     void commitSwipe();
     int dragMarkerTempo = -1, dragMarkerSig = -1;
+
+    // Multi-clip selection (marquee, Shift/Cmd-click); selectedClipID stays the primary clip
+    std::set<te::EditItemID> multiSel;
+    std::map<te::EditItemID, double> groupOrigStart;
+    juce::Point<int> marqueeStart;
+    juce::Rectangle<int> marqueeRect;
+    std::set<te::EditItemID> marqueeBase;
+    bool isClipSelected (const te::Clip& c) const   { return c.itemID == selectedClipID || multiSel.count (c.itemID) > 0; }
+    void deleteSelectedClips();
+    void saveLayout();
+    void loadLayout();
     void compMouseDown (const juce::MouseEvent&, te::AudioTrack&, int take);
     std::set<te::EditItemID> compTracks;
     te::EditItemID swipeClipID;

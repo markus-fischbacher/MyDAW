@@ -173,9 +173,13 @@ MainComponent::MainComponent()
 
     // --demo-consolidate: render the first clip of track 2 in place
     if (args.contains ("--demo-consolidate"))
-        if (auto* track = te::getAudioTracks (*edit)[0])
+        if (auto* track = te::getAudioTracks (*edit)[1])
             if (track->getClips().size() > 0)
                 arrangement->consolidateClip (track->getClips()[0]->itemID);
+
+    // --demo-comp: add takes to the track 2 clip and swipe one over part of it
+    if (args.contains ("--demo-comp"))
+        arrangement->setupCompDemo (1);
 
     // --demo-bus: a return track, a send on track 1, track 2 routed into track 3
     if (args.contains ("--demo-bus"))
@@ -403,8 +407,9 @@ void MainComponent::exportAudioFromChooser()
         const juce::String ext = mp3 ? "mp3" : fmt <= 1 ? "wav" : fmt == 2 ? "aiff" : fmt == 3 ? "flac" : "ogg";
 
         // MP3: render to a temporary WAV beside the target, then encode
-        auto render = [lame, mp3] (const te::Renderer::Parameters& params) -> juce::File
+        auto render = [lame, mp3, ed = edit.get()] (const te::Renderer::Parameters& params) -> juce::File
         {
+            ScopedNoProxies noProxies (*ed);
             if (! mp3)
                 return te::Renderer::renderToFile ("Export", params);
 

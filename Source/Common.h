@@ -36,3 +36,28 @@ struct SyncUIBehaviour : public te::UIBehaviour
         {}
     }
 };
+
+/** Offline renders must not wait for background time-stretch proxies (they never finish while the message thread is
+    busy rendering), so warped clips are rendered with the real-time stretcher instead. */
+struct ScopedNoProxies
+{
+    explicit ScopedNoProxies (te::Edit& e)
+    {
+        for (auto* track : te::getClipTracks (e))
+            for (auto* clip : track->getClips())
+                if (auto* w = dynamic_cast<te::WaveAudioClip*> (clip))
+                    if (w->canUseProxy())
+                    {
+                        w->setUsesProxy (false);
+                        changed.push_back (w);
+                    }
+    }
+
+    ~ScopedNoProxies()
+    {
+        for (auto* w : changed)
+            w->setUsesProxy (true);
+    }
+
+    std::vector<te::WaveAudioClip*> changed;
+};

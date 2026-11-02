@@ -52,6 +52,8 @@ Optional args: a `.tracktionedit` project to open, audio files (placed on consec
 | Swipe comping | Track header menu: Show / Hide Take Lanes, select a clip with takes, drag across a take lane to use it for that range |
 | Edit tempo / time-signature markers | Double-click a marker in the ruler, or right-click the ruler (edit, move to playhead, delete, add) |
 | Rebind shortcuts | View menu > Keyboard Shortcuts... (conflicts are rejected) |
+| Select several clips | Drag a rectangle in empty space, or Shift/Cmd-click; drag one to move all, Delete removes all |
+| Lane layout | Lane heights, collapsed lanes and take lanes are saved with the project |
 | Consolidate clip | Clip right-click menu: Consolidate in Place renders the clip with its effects (turn Warp off first) |
 | Move tempo / time-sig markers | Drag a marker in the ruler (time signatures snap to bars) |
 | Loop recording | Enable Loop (loop longer than 2 s), arm a track and record: each pass becomes a take; use the take lanes to comp |

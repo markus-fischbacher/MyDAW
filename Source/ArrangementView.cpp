@@ -3,6 +3,7 @@
 ArrangementView::ArrangementView (te::Edit& e)
     : edit (e), editState (e.state)
 {
+    loadLayout();
     editState.addListener (this);
     setWantsKeyboardFocus (false);
     setOpaque (true);
@@ -208,10 +209,14 @@ void ArrangementView::paintCompLanes (juce::Graphics& g, te::AudioTrack& t, int 
                 const int idx = sec[te::IDs::takeIndex];
                 const int sx = juce::jmax (x1, (int) toX (times.getStart())), ex = juce::jmin (x2, (int) toX (times.getEnd()));
                 g.setColour (Palette::accent.withAlpha (0.55f));
-                g.fillRect (sx, y + 1, ex - sx - 1, compLaneHeight - 2);
-                g.setColour (juce::Colours::white);
-                g.setFont (10.0f);
-                g.drawText (juce::String (idx + 1), sx + 2, y + 1, ex - sx - 4, compLaneHeight - 2, juce::Justification::centredLeft);
+                if (ex - sx > 1)
+                    g.fillRect (sx, y + 1, ex - sx - 1, compLaneHeight - 2);
+                if (ex - sx > 10)
+                {
+                    g.setColour (juce::Colours::white);
+                    g.setFont (10.0f);
+                    g.drawText (juce::String (idx + 1), sx + 2, y + 1, ex - sx - 4, compLaneHeight - 2, juce::Justification::centredLeft);
+                }
             }
         }
         else if (i == active)
@@ -411,6 +416,14 @@ void ArrangementView::paint (juce::Graphics& g)
 
     paintRuler (g);
     paintHeaders (g);
+    if (! marqueeRect.isEmpty())
+    {
+        g.setColour (juce::Colours::white.withAlpha (0.12f));
+        g.fillRect (marqueeRect);
+        g.setColour (juce::Colours::white.withAlpha (0.7f));
+        g.drawRect (marqueeRect, 1);
+    }
+
     paintPlayhead (g);
 }
 
@@ -494,7 +507,7 @@ void ArrangementView::paintClips (juce::Graphics& g, juce::Rectangle<int> lanes)
 
 void ArrangementView::paintClip (juce::Graphics& g, te::Clip& clip, juce::Rectangle<int> b)
 {
-    const bool selected = clip.itemID == selectedClipID;
+    const bool selected = isClipSelected (clip);
     auto* midi = dynamic_cast<te::MidiClip*> (&clip);
     auto colour = midi != nullptr ? Palette::midiClip : Palette::clip;
 
@@ -1113,7 +1126,7 @@ void ArrangementView::addTrack (bool instrument)
 }
 
 void ArrangementView::bounceToNewTrack (te::AudioTrack& src, te::TimeRange range, const juce::String& name,
-                                        std::function<void()> muteOriginal)
+                                        std::function<void()> muteOriginal, te::Clip* onlyClip)
 {
     edit.getTransport().stop (false, false);
 
@@ -1126,7 +1139,14 @@ void ArrangementView::bounceToNewTrack (te::AudioTrack& src, te::TimeRange range
     p.useMasterPlugins = false;
     p.tracksToDo.setBit (te::getAllTracks (edit).indexOf (&src));
 
-    const auto out = te::Renderer::renderToFile ("Bounce", p);
+    if (onlyClip != nullptr)
+        p.allowedClips.add (onlyClip);
+
+    juce::File out;
+    {
+        ScopedNoProxies noProxies (edit);
+        out = te::Renderer::renderToFile ("Bounce", p);
+    }
 
 
     if (! out.existsAsFile())
@@ -1159,14 +1179,6 @@ void ArrangementView::consolidateClip (te::EditItemID id)
     if (track == nullptr)
         return;
 
-    if (auto* w = dynamic_cast<te::WaveAudioClip*> (clip))
-        if (w->getAutoTempo())
-        {
-            juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::InfoIcon, "Consolidate",
-                                                    "Turn Warp off for this clip before consolidating (warped clips can't be rendered offline yet).");
-            return;
-        }
-
     edit.getTransport().stop (false, false);
     const auto range = clip->getEditTimeRange();
     const auto name = clip->getName();
@@ -1179,8 +1191,13 @@ void ArrangementView::consolidateClip (te::EditItemID id)
     p.usePlugins = true;
     p.useMasterPlugins = false;
     p.tracksToDo.setBit (te::getAllTracks (edit).indexOf (track));
+    p.allowedClips.add (clip);
 
-    const auto out = te::Renderer::renderToFile ("Consolidate", p);
+    juce::File out;
+    {
+        ScopedNoProxies noProxies (edit);
+        out = te::Renderer::renderToFile ("Consolidate", p);
+    }
 
     if (! out.existsAsFile())
     {
@@ -1730,7 +1747,70 @@ void ArrangementView::handleAsyncUpdate()
     for (auto it = thumbnails.begin(); it != thumbnails.end();)
         it = te::findClipForID (edit, it->first) == nullptr ? thumbnails.erase (it) : std::next (it);
 
+    saveLayout();
     repaint();
+}
+
+// Lane layout lives in the Edit's state (non-undoable) so it is saved with the project.
+static juce::String idsToString (const std::set<te::EditItemID>& ids)
+{
+    juce::StringArray a;
+    for (auto id : ids)
+        a.add (id.toString());
+    return a.joinIntoString (",");
+}
+
+static std::set<te::EditItemID> idsFromString (const juce::String& s)
+{
+    std::set<te::EditItemID> out;
+    for (auto& t : juce::StringArray::fromTokens (s, ",", {}))
+        if (auto id = te::EditItemID::fromString (t); id.isValid())
+            out.insert (id);
+    return out;
+}
+
+void ArrangementView::saveLayout()
+{
+    auto ui = editState.getOrCreateChildWithName ("ARRANGERUI", nullptr);
+    ui.setProperty ("laneHeight", autoLaneHeight, nullptr);
+    ui.setProperty ("expanded", idsToString (expandedTracks), nullptr);
+    ui.setProperty ("automation", idsToString (automationTracks), nullptr);
+    ui.setProperty ("comp", idsToString (compTracks), nullptr);
+
+    juce::StringArray collapsed;                     // "<trackID>:<lane index>"
+    for (auto id : expandedTracks)
+        if (auto* t = dynamic_cast<te::AudioTrack*> (te::findTrackForID (edit, id)))
+        {
+            auto lanes = expandedLanes (*t);
+            for (int i = 0; i < (int) lanes.size(); ++i)
+                if (hiddenLanes.count (lanes[(size_t) i].param) > 0)
+                    collapsed.add (id.toString() + ":" + juce::String (i));
+        }
+
+    ui.setProperty ("collapsed", collapsed.joinIntoString (","), nullptr);
+}
+
+void ArrangementView::loadLayout()
+{
+    auto ui = editState.getChildWithName ("ARRANGERUI");
+
+    if (! ui.isValid())
+        return;
+
+    autoLaneHeight = juce::jlimit (36, 240, (int) ui.getProperty ("laneHeight", autoLaneHeight));
+    expandedTracks = idsFromString (ui["expanded"]);
+    automationTracks = idsFromString (ui["automation"]);
+    compTracks = idsFromString (ui["comp"]);
+
+    for (auto& s : juce::StringArray::fromTokens (ui["collapsed"].toString(), ",", {}))
+        if (auto id = te::EditItemID::fromString (s.upToLastOccurrenceOf (":", false, false)); id.isValid())
+            if (auto* t = dynamic_cast<te::AudioTrack*> (te::findTrackForID (edit, id)))
+            {
+                auto lanes = expandedLanes (*t);
+                const int i = s.fromLastOccurrenceOf (":", false, false).getIntValue();
+                if (juce::isPositiveAndBelow (i, (int) lanes.size()))
+                    hiddenLanes.insert (lanes[(size_t) i].param);
+            }
 }
 
 void ArrangementView::timerCallback()
@@ -1928,22 +2008,62 @@ void ArrangementView::mouseDown (const juce::MouseEvent& e)
     }
 
     const auto hit = hitTestClip (e.getPosition());
+    const bool additive = e.mods.isShiftDown() || e.mods.isCommandDown();
 
     if (hit.clip == nullptr)
     {
-        selectedClipID = {};
+        if (! additive)
+        {
+            selectedClipID = {};
+            multiSel.clear();
+        }
+
+        marqueeBase = multiSel;
+        marqueeStart = e.getPosition();
+        marqueeRect = {};
+        dragMode = DragMode::marquee;
         repaint();
         return;
     }
 
-    selectedClipID = hit.clip->itemID;
-
     if (e.mods.isPopupMenu())
     {
+        if (! isClipSelected (*hit.clip))
+            multiSel.clear();
+        selectedClipID = hit.clip->itemID;
         repaint();
         showClipMenu (hit.clip->itemID);
         return;
     }
+
+    if (additive)
+    {
+        if (selectedClipID.isValid())
+            multiSel.insert (selectedClipID);
+
+        if (multiSel.erase (hit.clip->itemID) == 0)
+        {
+            multiSel.insert (hit.clip->itemID);
+            selectedClipID = hit.clip->itemID;
+        }
+        else if (selectedClipID == hit.clip->itemID)
+            selectedClipID = multiSel.empty() ? te::EditItemID() : *multiSel.begin();
+
+        repaint();
+        return;
+    }
+
+    if (! multiSel.empty() && multiSel.count (hit.clip->itemID) > 0 && hit.mode == DragMode::move)
+        ;                                                // drag the whole selection
+    else
+        multiSel.clear();
+
+    selectedClipID = hit.clip->itemID;
+
+    groupOrigStart.clear();
+    for (auto id : multiSel)
+        if (auto* oc = te::findClipForID (edit, id))
+            groupOrigStart[id] = timeToBeat (oc->getPosition().getStart());
 
     dragClipID = hit.clip->itemID;
     dragMode = hit.mode;
@@ -1974,6 +2094,25 @@ void ArrangementView::mouseDrag (const juce::MouseEvent& e)
             seq.getTimeSig (dragMarkerSig)->startBeatNumber = seq.toBeats (te::tempo::BarsAndBeats { bar, te::BeatDuration() });
         }
 
+        repaint();
+        return;
+    }
+
+    if (dragMode == DragMode::marquee)
+    {
+        marqueeRect = juce::Rectangle<int>::leftTopRightBottom (juce::jmin (marqueeStart.x, e.x), juce::jmin (marqueeStart.y, e.y),
+                                                                juce::jmax (marqueeStart.x, e.x), juce::jmax (marqueeStart.y, e.y));
+        multiSel = marqueeBase;
+        const auto tracks = te::getAudioTracks (edit);
+
+        for (int i = 0; i < tracks.size(); ++i)
+            for (auto* clip : tracks[i]->getClips())
+                if (getClipBounds (*clip, i).intersects (marqueeRect))
+                    multiSel.insert (clip->itemID);
+
+        selectedClipID = multiSel.size() == 1 ? *multiSel.begin() : te::EditItemID();
+        if (multiSel.size() == 1)
+            multiSel.clear();
         repaint();
         return;
     }
@@ -2069,6 +2208,15 @@ void ArrangementView::mouseDrag (const juce::MouseEvent& e)
             const auto newStart = juce::jmax (0.0, snapBeat (dragClipStartBeat + delta, bypassSnap));
             clip->setStart (beatToTime (newStart), false, true);
 
+            if (! multiSel.empty())                       // group move: same offset, same tracks
+            {
+                for (auto& [id, orig] : groupOrigStart)
+                    if (id != dragClipID)
+                        if (auto* oc = te::findClipForID (edit, id))
+                            oc->setStart (beatToTime (juce::jmax (0.0, orig + (newStart - dragClipStartBeat))), false, true);
+                break;
+            }
+
             // Vertical move to another track
             const auto tracks = te::getAudioTracks (edit);
             const int targetIndex = yToTrackIndex (e.y);
@@ -2136,6 +2284,33 @@ void ArrangementView::mouseDrag (const juce::MouseEvent& e)
     }
 }
 
+void ArrangementView::setupCompDemo (int trackIndex)
+{
+    auto tracks = te::getAudioTracks (edit);
+    if (! juce::isPositiveAndBelow (trackIndex, tracks.size()))
+        return;
+
+    for (auto* clip : tracks[trackIndex]->getClips())
+        if (auto* w = dynamic_cast<te::WaveAudioClip*> (clip))
+        {
+            const auto file = w->getOriginalFile();
+            w->addTake (file);
+            w->addTake (file);
+            selectedClipID = w->itemID;
+            compTracks.insert (tracks[trackIndex]->itemID);
+
+            const auto pos = w->getPosition();
+            swipeClipID = w->itemID;
+            swipeTake = 1;
+            swipeStartBeat = timeToBeat (pos.getStart()) + 0.5;
+            swipeEndBeat = timeToBeat (pos.getStart()) + 1.5;
+            commitSwipe();
+            swipeTake = -1;
+            repaint();
+            return;
+        }
+}
+
 void ArrangementView::commitSwipe()
 {
     auto* w = dynamic_cast<te::WaveAudioClip*> (te::findClipForID (edit, swipeClipID));
@@ -2194,6 +2369,18 @@ void ArrangementView::commitSwipe()
     repaint();
 }
 
+void ArrangementView::deleteSelectedClips()
+{
+    edit.getUndoManager().beginNewTransaction();
+
+    for (auto id : multiSel)
+        if (auto* clip = te::findClipForID (edit, id))
+            clip->removeFromParent();
+
+    multiSel.clear();
+    selectedClipID = {};
+}
+
 void ArrangementView::mouseUp (const juce::MouseEvent&)
 {
     if (dragMode == DragMode::loopMove && ! loopMoved)     // a plain click on the loop bar toggles looping
@@ -2205,6 +2392,13 @@ void ArrangementView::mouseUp (const juce::MouseEvent&)
         swipeTake = -1;
     }
 
+    if (dragMode == DragMode::marquee)
+    {
+        marqueeRect = {};
+        repaint();
+    }
+
+    saveLayout();
     dragAutoIndex = dragMarkerTempo = dragMarkerSig = -1;
     dragMode = DragMode::none;
     dragClipID = {};
@@ -2313,6 +2507,12 @@ bool ArrangementView::keyPressed (const juce::KeyPress& key)
     if (key == juce::KeyPress ('v', cmd, 0) && ! autoClipboard.empty())
     {
         pasteAuto();
+        return true;
+    }
+
+    if (! multiSel.empty() && (key == juce::KeyPress::deleteKey || key == juce::KeyPress::backspaceKey))
+    {
+        deleteSelectedClips();
         return true;
     }
 
@@ -2725,7 +2925,7 @@ void ArrangementView::showClipMenu (te::EditItemID id)
         else if (r == 15)
         {
             if (auto* at = dynamic_cast<te::AudioTrack*> (c->getTrack()))
-                bounceToNewTrack (*at, c->getEditTimeRange(), c->getName(), {});
+                bounceToNewTrack (*at, c->getEditTimeRange(), c->getName(), {}, c);
 
             if (auto* cc = te::findClipForID (edit, id))
                 cc->setMuted (true);
