@@ -31,6 +31,7 @@ public:
     void deleteSelectedTrack();
     bool hasSelectedTrack() const           { return getSelectedTrack() != nullptr; }
     void toggleAutomationOnSelectedTrack();
+    void toggleExpandAllAutomation();
     void selectTrackIndex (int index);
     te::AudioTrack* selectedTrack() const   { return getSelectedTrack(); }
     double beatsPerBar() const;
@@ -59,7 +60,7 @@ public:
     std::function<juce::File()> getDraggedBrowserFile;
 
 private:
-    enum class DragMode { none, scrub, move, trimStart, trimEnd, automation, loopRange, fadeIn, fadeOut };
+    enum class DragMode { none, scrub, move, trimStart, trimEnd, automation, loopRange, fadeIn, fadeOut, loopStart, loopEnd, loopMove };
 
     struct ClipHit
     {
@@ -67,7 +68,7 @@ private:
         DragMode mode = DragMode::none;
     };
 
-    static constexpr int headerWidth = 170, rulerHeight = 28, trackHeight = 84, clipHeaderHeight = 16, edgeGrabWidth = 6;
+    static constexpr int headerWidth = 170, rulerHeight = 28, trackHeight = 84, clipHeaderHeight = 16, edgeGrabWidth = 6, autoLaneHeight = 60, loopBarTop = 14;
 
     // Coordinate mapping
     double beatToX (double beat) const;
@@ -76,6 +77,8 @@ private:
     te::TimePosition beatToTime (double beat) const;
     double timeToBeat (te::TimePosition) const;
     int trackY (int trackIndex) const;
+    int rowHeight (int trackIndex) const;
+    int totalTracksHeight() const;
     int yToTrackIndex (int y) const;
     juce::Rectangle<int> getClipBounds (te::Clip&, int trackIndex) const;
     juce::Rectangle<int> getLanesArea() const;
@@ -111,11 +114,15 @@ private:
 
     // Automation (volume / pan breakpoints, edited directly in the lane)
     te::AutomatableParameter* getAutoParam (te::AudioTrack&) const;
-    float autoValueToY (te::AutomatableParameter&, float value, int trackIndex) const;
-    float autoYToValue (te::AutomatableParameter&, int y, int trackIndex) const;
-    int hitTestAutoPoint (te::AutomatableParameter&, int trackIndex, juce::Point<int>) const;
+    struct ExpandedLane { te::AutomatableParameter* param; juce::String label; };
+    std::vector<ExpandedLane> expandedLanes (te::AudioTrack&) const;
+    bool isExpanded (const te::AudioTrack& t) const    { return expandedTracks.count (t.itemID) > 0; }
+    float autoValueToY (te::AutomatableParameter&, float value, juce::Rectangle<int> lane) const;
+    float autoYToValue (te::AutomatableParameter&, int y, juce::Rectangle<int> lane) const;
+    int hitTestAutoPoint (te::AutomatableParameter&, juce::Rectangle<int> lane, juce::Point<int>) const;
+    void paintAutomationLane (juce::Graphics&, te::AutomatableParameter&, juce::Rectangle<int> lane, const juce::String& label);
     void paintAutomation (juce::Graphics&, te::AudioTrack&, int trackIndex);
-    void automationMouseDown (const juce::MouseEvent&, te::AudioTrack&, int trackIndex);
+    void automationMouseDown (const juce::MouseEvent&, te::AudioTrack&, te::AutomatableParameter&, juce::Rectangle<int> lane);
 
     void paintGrid (juce::Graphics&, juce::Rectangle<int> lanes);
     void paintClips (juce::Graphics&, juce::Rectangle<int> lanes);
@@ -148,6 +155,12 @@ private:
     void showAutomationParamMenu (te::AudioTrack&);
     std::map<te::EditItemID, int> automationParam;      // 0 = volume (default), 1 = pan
     int dragAutoIndex = -1;
+    te::AutomatableParameter* dragParam = nullptr;
+    juce::Rectangle<int> dragLane;
+    std::set<te::EditItemID> expandedTracks;
+    std::map<te::EditItemID, std::set<std::pair<te::EditItemID, int>>> pinnedParams;
+    double loopGrabBeat = 0.0, loopOrigStart = 0.0, loopOrigEnd = 0.0;
+    bool loopMoved = false;
     double loopAnchorBeat = 0.0;
     te::EditItemID dragAutoTrack;
     juce::TextEditor renameEditor;

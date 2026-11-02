@@ -30,7 +30,7 @@ private:
     enum MenuIDs { newProject = 1, openProject, saveProject, saveProjectAs, importAudio, exportAudio, undo, redo,
                    addAudioTrack, addInstrumentTrack, addReturnTrack, deleteTrack, toggleAutomation,
                    toggleMixer, toggleBrowser, toggleLoop, toggleClick, trackPlugins,
-                   insertTempo, resetTempoMap, setTimeSig, insertTimeSig, togglePunch, masterPlugins, zoomFit, recoverAutosave, importMidi, recentBase = 1000 };
+                   insertTempo, resetTempoMap, setTimeSig, insertTimeSig, togglePunch, masterPlugins, zoomFit, recoverAutosave, importMidi, expandAutomation, recentBase = 1000 };
 
     // Project handling
     void setEdit (std::unique_ptr<te::Edit>, const juce::File& file);

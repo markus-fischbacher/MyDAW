@@ -44,9 +44,10 @@ Optional args: a `.tracktionedit` project to open, audio files (placed on consec
 | Bounce / freeze | Right-click clip > Bounce to New Track; right-click track header > Freeze Track |
 | Automate any plug-in parameter | Show automation (A), then click the Vol/Pan/FX button to pick a parameter |
 | MP3 export | Shown in the export dialog when the `lame` encoder is installed (e.g. `brew install lame`) |
+| Expand all automation lanes | Shift+Cmd+A (View menu), or per track via the header right-click menu; shows volume, pan and every plug-in parameter that has automation |
 | Scroll | Trackpad / wheel (Shift = horizontal) |
 | Locate | Click/drag in ruler |
-| Set loop range | Shift+drag in ruler; toggle with Loop button / Cmd+L |
+| Set loop range | Drag in the lower half of the ruler ("drag here to set loop"); drag its edges to resize, its body to move, click it to toggle looping; Cmd+L also toggles |
 | Metronome | Click button / Cmd+K |
 | Tempo | Double-click the BPM readout and type |
 | Mixer (volume, pan, M/S, meters, master) | Mixer button / Cmd+M |

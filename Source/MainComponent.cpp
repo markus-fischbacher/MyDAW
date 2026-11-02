@@ -150,6 +150,19 @@ MainComponent::MainComponent()
         }
     }
 
+    // --demo-auto: automation on volume + pan, all lanes expanded, a loop range
+    if (args.contains ("--demo-auto"))
+    {
+        auto* vp = te::getAudioTracks (*edit)[0]->getVolumePlugin();
+        vp->volParam->getCurve().addPoint (0_tp, 0.6f, 0.0f, nullptr);
+        vp->volParam->getCurve().addPoint (4_tp, 0.9f, 0.0f, nullptr);
+        vp->panParam->getCurve().addPoint (1_tp, -0.5f, 0.0f, nullptr);
+        vp->panParam->getCurve().addPoint (6_tp, 0.5f, 0.0f, nullptr);
+        edit->getTransport().setLoopRange ({ 2_tp, 6_tp });
+        edit->getTransport().looping = true;
+        arrangement->toggleExpandAllAutomation();
+    }
+
     // --demo-freeze: bounce the demo MIDI track to a new audio track
     if (args.contains ("--demo-freeze"))
     {
@@ -810,6 +823,7 @@ juce::PopupMenu MainComponent::getMenuForIndex (int index, const juce::String&)
         add (toggleMixer, "Show/Hide Mixer",   "cmd + M");
         add (toggleBrowser, "Show/Hide Browser", "cmd + B");
         add (zoomFit,     "Zoom to Fit Project", "shift + cmd + F");
+        add (expandAutomation, "Expand / Collapse All Automation", "shift + cmd + A");
         add (toggleLoop,  "Loop",              "cmd + L");
         add (toggleClick, "Metronome",         "cmd + K");
     }
@@ -857,6 +871,7 @@ void MainComponent::menuItemSelected (int id, int)
         case toggleMixer:    setMixerVisible (! mixerVisible); break;
         case toggleBrowser:  setBrowserVisible (! browserVisible); break;
         case zoomFit:        arrangement->zoomToFit(); break;
+        case expandAutomation: arrangement->toggleExpandAllAutomation(); break;
         case recoverAutosave:
         {
             auto dir = autosaveFile().getParentDirectory();
@@ -993,6 +1008,7 @@ bool MainComponent::keyPressed (const juce::KeyPress& key)
         { { 't', cmd, 0 },         addAudioTrack },
         { { 't', cmd | shift, 0 }, addInstrumentTrack },
         { { 'a', cmd, 0 },         toggleAutomation },
+        { { 'a', cmd | shift, 0 }, expandAutomation },
         { { 'm', cmd, 0 },         toggleMixer },
         { { 'b', cmd, 0 },         toggleBrowser },
         { { 'l', cmd, 0 },         toggleLoop },
