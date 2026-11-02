@@ -32,6 +32,8 @@ TransportBar::TransportBar (te::Edit& e)
         auto& t = edit.getTransport();
         if (t.isRecording())
             t.stop (false, false);
+        else if (onRecord)
+            onRecord();
         else
             t.record (false, true);
     };

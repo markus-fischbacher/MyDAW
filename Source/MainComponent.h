@@ -66,6 +66,7 @@ private:
     void saveBindings();
     juce::String shortcutText (int menuID) const;
     void showShortcutEditor();
+    void startRecording();
     class ShortcutEditor;
     std::unique_ptr<juce::DialogWindow> shortcutDialog;
 
@@ -76,7 +77,7 @@ private:
 
     void timerCallback() override;
 
-    te::Engine engine { JUCE_APPLICATION_NAME_STRING, std::make_unique<SyncUIBehaviour>(), nullptr };
+    te::Engine engine { JUCE_APPLICATION_NAME_STRING, std::make_unique<SyncUIBehaviour>(), std::make_unique<ArrangerEngineBehaviour>() };
     std::unique_ptr<te::Edit> edit;
     juce::File projectFile;     // empty while the project is untitled
 

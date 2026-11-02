@@ -37,6 +37,35 @@ struct SyncUIBehaviour : public te::UIBehaviour
     }
 };
 
+/** Where new recordings go (the project's audio folder); set by MainComponent. */
+inline std::function<juce::File()>& recordingFolderProvider()
+{
+    static std::function<juce::File()> f;
+    return f;
+}
+
+struct ArrangerEngineBehaviour : public te::EngineBehaviour
+{
+    juce::File getFileForNewAudioRecording (te::Track& track, const juce::String& ext) override
+    {
+        auto folder = recordingFolderProvider() ? recordingFolderProvider()() : juce::File();
+
+        if (folder == juce::File())
+            return {};
+
+        folder.createDirectory();
+        const auto name = juce::File::createLegalFileName (track.getName().isEmpty() ? juce::String ("Track") : track.getName());
+
+        for (int take = 1;; ++take)
+        {
+            auto f = folder.getChildFile (name + "_Take_" + juce::String (take) + ext);
+
+            if (! f.exists())
+                return f;
+        }
+    }
+};
+
 /** Offline renders must not wait for background time-stretch proxies (they never finish while the message thread is
     busy rendering), so warped clips are rendered with the real-time stretcher instead. */
 /** Bounced / consolidated audio must not live in the engine's temp folder: the engine treats it as a cache

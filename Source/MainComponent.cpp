@@ -382,6 +382,11 @@ void MainComponent::setEdit (std::unique_ptr<te::Edit> newEdit, const juce::File
 void MainComponent::buildViews()
 {
     transportBar = std::make_unique<TransportBar> (*edit);
+    transportBar->onRecord = [this] { startRecording(); };
+    recordingFolderProvider() = [this]
+    {
+        return projectFile == juce::File() ? juce::File() : projectFile.getSiblingFile (projectFile.getFileNameWithoutExtension() + " Audio");
+    };
     transportBar->onAddFile = [this] { addAudioFileFromChooser(); };
     transportBar->onShowSettings = [this]
     {
@@ -720,6 +725,28 @@ void MainComponent::chooseAndOpenProject()
                                           openProjectFile (fc.getResult());
                                   });
     });
+}
+
+void MainComponent::startRecording()
+{
+    if (projectFile != juce::File())
+    {
+        edit->getTransport().record (false, true);
+        return;
+    }
+
+    juce::AlertWindow::showAsync (juce::MessageBoxOptions()
+                                      .withIconType (juce::MessageBoxIconType::QuestionIcon)
+                                      .withTitle ("Save project first")
+                                      .withMessage ("Recordings are stored in the project's audio folder next to the project file. Save the project now?")
+                                      .withButton ("Save...", 1)
+                                      .withButton ("Cancel", 0)
+                                      .withAssociatedComponent (this),
+                                  [this] (int r)
+                                  {
+                                      if (r == 1)
+                                          saveCurrentProject ([this] (bool ok) { if (ok) edit->getTransport().record (false, true); });
+                                  });
 }
 
 void MainComponent::saveCurrentProject (std::function<void (bool)> done)
@@ -1373,7 +1400,7 @@ bool MainComponent::keyPressed (const juce::KeyPress& key)
         if (transport.isRecording())
             transport.stop (false, false);
         else
-            transport.record (false, true);
+            startRecording();
         return true;
     }
 

@@ -14,7 +14,7 @@ public:
     void paint (juce::Graphics&) override;
     void resized() override;
 
-    std::function<void()> onAddFile, onShowSettings, onToggleMixer;
+    std::function<void()> onAddFile, onShowSettings, onToggleMixer, onRecord;
     void setMixerShown (bool b) { mixerButton.setToggleState (b, juce::dontSendNotification); }
 
 private:
