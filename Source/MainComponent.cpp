@@ -173,10 +173,24 @@ MainComponent::MainComponent()
 
     // --demo-reverse / --demo-transpose: apply the clip-menu operation to the first clip of track 2 (use with --demo-freeze)
     if (args.contains ("--demo-reverse") || args.contains ("--demo-transpose") || args.contains ("--demo-warp")
-         || args.contains ("--demo-gain") || args.contains ("--demo-fades"))
+         || args.contains ("--demo-gain") || args.contains ("--demo-fades") || args.contains ("--demo-unreverse"))
         if (auto* w = dynamic_cast<te::WaveAudioClip*> (te::getAudioTracks (*edit)[1]->getClips().getFirst()))
         {
             if (args.contains ("--demo-reverse"))   w->setIsReversed (true);
+            if (args.contains ("--demo-unreverse"))      // reverse, then switch it off again after 6 s (like the clip menu)
+            {
+                w->setIsReversed (true);
+                const auto id = w->itemID;
+                juce::Timer::callAfterDelay (6000, [this, id]
+                {
+                    if (auto* cw = dynamic_cast<te::WaveAudioClip*> (te::findClipForID (*edit, id)))
+                    {
+                        cw->setIsReversed (false);
+                        std::cerr << "OPS unreversed, file " << cw->getAudioFile().getFile().getFullPathName() << " exists "
+                                  << (int) cw->getAudioFile().getFile().existsAsFile() << std::endl;
+                    }
+                });
+            }
             if (args.contains ("--demo-warp"))      arrangement->setClipWarpForDemo (*w);
             if (args.contains ("--demo-gain"))      w->setGainDB (6.0f);
             if (args.contains ("--demo-fades"))   { w->setFadeIn (te::TimeDuration::fromSeconds (0.5)); w->setFadeOut (te::TimeDuration::fromSeconds (0.5)); }
@@ -188,7 +202,7 @@ MainComponent::MainComponent()
 
     // --demo-ops-render [--noproxy]: render track 2 and print where the energy sits (first vs last half second)
     if (args.contains ("--demo-ops-render"))
-      juce::Timer::callAfterDelay (8000, [this, args]
+      juce::Timer::callAfterDelay (args.contains ("--demo-unreverse") ? 20000 : 8000, [this, args]
     {
         auto* track = te::getAudioTracks (*edit)[1];
         te::Renderer::Parameters rp (*edit);

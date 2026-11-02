@@ -587,15 +587,16 @@ void ArrangementView::paintClip (juce::Graphics& g, te::Clip& clip, juce::Rectan
             auto body = b.withTrimmedTop (clipHeaderHeight).reduced (0, 2);
             g.setColour (colour.brighter (0.4f));
             thumb->drawChannels (g, body, sourceRange, juce::Decibels::decibelsToGain (wave->getGainDB()));
-
-            if (! wave->getAudioFile().getFile().existsAsFile())       // proxy (reverse / pitch / stretch) still being rendered
-            {
-                g.setColour (juce::Colours::white.withAlpha (0.8f));
-                g.setFont (juce::FontOptions (11.0f));
-                g.drawText ("rendering...", body, juce::Justification::centred);
-                repaint (b);
-            }
         }
+        else
+        {
+            auto body = b.withTrimmedTop (clipHeaderHeight).reduced (0, 2);
+            g.setColour (juce::Colours::white.withAlpha (0.8f));
+            g.setFont (juce::FontOptions (11.0f));
+            g.drawText ("rendering...", body, juce::Justification::centred);
+            repaint (b);
+        }
+
         {
             auto body = b.withTrimmedTop (clipHeaderHeight).reduced (0, 2);
             // Fade shapes + handles
@@ -1764,6 +1765,13 @@ te::SmartThumbnail* ArrangementView::getThumbnailFor (te::WaveAudioClip& clip)
 
     if (! file.isValid())
         return nullptr;
+
+    if (! file.getFile().existsAsFile())          // proxy still rendering: a thumbnail made now would be cached empty
+    {
+        thumbnails.erase (clip.itemID);
+        thumbnailFiles.erase (clip.itemID);
+        return nullptr;
+    }
 
     auto& thumb = thumbnails[clip.itemID];
     auto& known = thumbnailFiles[clip.itemID];
