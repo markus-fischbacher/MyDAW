@@ -27,6 +27,15 @@ TransportBar::TransportBar (te::Edit& e)
         t.stop (false, false);
     };
 
+    recordButton.onClick = [this]
+    {
+        auto& t = edit.getTransport();
+        if (t.isRecording())
+            t.stop (false, false);
+        else
+            t.record (false, true);
+    };
+
     addFileButton.onClick  = [this] { if (onAddFile) onAddFile(); };
     settingsButton.onClick = [this] { if (onShowSettings) onShowSettings(); };
 
@@ -64,7 +73,7 @@ TransportBar::TransportBar (te::Edit& e)
     positionLabel.setFont (juce::FontOptions (20.0f, juce::Font::bold));
     cpuLabel.setColour (juce::Label::textColourId, Palette::textDim);
 
-    for (auto* b : { &playButton, &stopButton, &addFileButton, &settingsButton, &loopButton, &clickButton, &mixerButton })
+    for (auto* b : { &playButton, &stopButton, &recordButton, &addFileButton, &settingsButton, &loopButton, &clickButton, &mixerButton })
     {
         b->setWantsKeyboardFocus (false);
         addAndMakeVisible (*b);
@@ -93,6 +102,8 @@ void TransportBar::resized()
     playButton.setBounds (r.removeFromLeft (70));
     r.removeFromLeft (4);
     stopButton.setBounds (r.removeFromLeft (70));
+    r.removeFromLeft (4);
+    recordButton.setBounds (r.removeFromLeft (60));
     r.removeFromLeft (16);
     positionLabel.setBounds (r.removeFromLeft (130));
     timeLabel.setBounds (r.removeFromLeft (110));
@@ -119,6 +130,8 @@ void TransportBar::changeListenerCallback (juce::ChangeBroadcaster*)
 void TransportBar::updateButtons()
 {
     const bool playing = edit.getTransport().isPlaying();
+    recordButton.setColour (juce::TextButton::buttonColourId,
+                            edit.getTransport().isRecording() ? juce::Colour (0xffc83030) : Palette::background);
     playButton.setButtonText (playing ? "Pause" : "Play");
     playButton.setColour (juce::TextButton::buttonColourId,
                           playing ? Palette::accent.withAlpha (0.6f) : Palette::background);
@@ -140,6 +153,7 @@ void TransportBar::timerCallback()
 
     if (! tempoLabel.isBeingEdited())
         tempoLabel.setText (juce::String (edit.tempoSequence.getBpmAt (pos), 2), juce::dontSendNotification);
+    updateButtons();
     loopButton.setToggleState (edit.getTransport().looping.get(), juce::dontSendNotification);
     clickButton.setToggleState (edit.clickTrackEnabled.get(), juce::dontSendNotification);
     cpuLabel.setText ("CPU " + juce::String (juce::roundToInt (edit.engine.getDeviceManager().getCpuUsage() * 100.0)) + "%",

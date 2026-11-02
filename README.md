@@ -38,6 +38,7 @@ Optional args: a `.tracktionedit` project to open, audio files (placed on consec
 | Rename / delete track | Double-click name / right-click header (or Track menu) |
 | Mute / solo | M / S buttons in header or mixer |
 | Automation (volume / pan) | A button in header (Cmd+A), Vol/Pan toggles parameter; click adds a point, drag moves, Alt-click or right-click deletes |
+| Record | R button arms a track (audio input, or MIDI inputs on instrument tracks); Rec button / Cmd+R records armed tracks; stop to finish |
 | Export WAV | Shift+Cmd+E |
 
 ## Layout

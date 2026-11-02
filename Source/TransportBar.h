@@ -24,7 +24,7 @@ private:
 
     te::Edit& edit;
 
-    juce::TextButton playButton { "Play" }, stopButton { "Stop" },
+    juce::TextButton playButton { "Play" }, stopButton { "Stop" }, recordButton { "Rec" },
                      addFileButton { "Add Audio..." }, settingsButton { "Audio Settings" },
                      loopButton { "Loop" }, clickButton { "Click" }, mixerButton { "Mixer" };
     juce::Label positionLabel, timeLabel, tempoLabel, cpuLabel;

@@ -26,6 +26,8 @@ public:
     bool hasSelectedTrack() const           { return getSelectedTrack() != nullptr; }
     void toggleAutomationOnSelectedTrack();
     void selectTrackIndex (int index);
+    void toggleArm (te::AudioTrack&);
+    bool isArmed (te::AudioTrack&) const;
 
     /** Called when a MIDI clip should be opened for editing (double-click, or just created). */
     std::function<void (te::EditItemID)> onOpenMidiClip;
@@ -76,7 +78,7 @@ private:
     te::AudioTrack* getSelectedTrack() const;
 
     // Track headers
-    enum class HeaderButton { none, mute, solo, automation, param };
+    enum class HeaderButton { none, mute, solo, arm, automation, param };
     juce::Rectangle<int> headerButtonRect (int trackIndex, HeaderButton) const;
     HeaderButton hitTestHeaderButton (juce::Point<int>, int trackIndex) const;
     void headerClicked (const juce::MouseEvent&);

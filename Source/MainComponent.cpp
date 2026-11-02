@@ -82,6 +82,18 @@ MainComponent::MainComponent()
         setMixerVisible (true);
     }
 
+    // --demo-record: arm an audio and an instrument track
+    if (args.contains ("--demo-record"))
+    {
+        arrangement->selectTrackIndex (1);
+        arrangement->addTrack (true);
+        juce::Timer::callAfterDelay (1000, [this]
+        {
+            arrangement->toggleArm (*te::getAudioTracks (*edit)[0]);
+            arrangement->toggleArm (*te::getAudioTracks (*edit).getLast());
+        });
+    }
+
     // --snapshot <file.png>: render the window to an image once thumbnails are ready, then quit.
     // Handy for visual checks and CI without touching the screen.
     const int snapIndex = args.indexOf ("--snapshot");
@@ -536,6 +548,15 @@ bool MainComponent::keyPressed (const juce::KeyPress& key)
         else
             transport.play (false);
 
+        return true;
+    }
+
+    if (key == juce::KeyPress ('r', cmd, 0))
+    {
+        if (transport.isRecording())
+            transport.stop (false, false);
+        else
+            transport.record (false, true);
         return true;
     }
 

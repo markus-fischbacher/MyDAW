@@ -408,6 +408,8 @@ void ArrangementView::paintHeaders (juce::Graphics& g)
         drawButton (HeaderButton::mute, "M", t->isMuted (false), juce::Colour (0xffd0a030));
         drawButton (HeaderButton::solo, "S", t->isSolo (false), juce::Colour (0xff3a8fd0));
 
+        drawButton (HeaderButton::arm, "R", isArmed (*t), juce::Colour (0xffe04848));
+
         const bool autoOn = automationTracks.count (t->itemID) > 0;
         drawButton (HeaderButton::automation, "A", autoOn, Palette::accent);
 
@@ -433,8 +435,9 @@ juce::Rectangle<int> ArrangementView::headerButtonRect (int trackIndex, HeaderBu
     {
         case HeaderButton::mute:        return { 10, y, 24, h };
         case HeaderButton::solo:        return { 38, y, 24, h };
-        case HeaderButton::automation:  return { 66, y, 24, h };
-        case HeaderButton::param:       return { 94, y, 34, h };
+        case HeaderButton::arm:         return { 66, y, 24, h };
+        case HeaderButton::automation:  return { 94, y, 24, h };
+        case HeaderButton::param:       return { 122, y, 34, h };
         case HeaderButton::none:        break;
     }
     return {};
@@ -442,7 +445,7 @@ juce::Rectangle<int> ArrangementView::headerButtonRect (int trackIndex, HeaderBu
 
 ArrangementView::HeaderButton ArrangementView::hitTestHeaderButton (juce::Point<int> p, int trackIndex) const
 {
-    for (auto b : { HeaderButton::mute, HeaderButton::solo, HeaderButton::automation, HeaderButton::param })
+    for (auto b : { HeaderButton::mute, HeaderButton::solo, HeaderButton::arm, HeaderButton::automation, HeaderButton::param })
     {
         if (b == HeaderButton::param)
         {
@@ -491,6 +494,7 @@ void ArrangementView::headerClicked (const juce::MouseEvent& e)
     {
         case HeaderButton::mute:        t->setMute (! t->isMuted (false)); break;
         case HeaderButton::solo:        t->setSolo (! t->isSolo (false)); break;
+        case HeaderButton::arm:         toggleArm (*t); break;
         case HeaderButton::automation:
             if (automationTracks.erase (t->itemID) == 0)
                 automationTracks.insert (t->itemID);
@@ -566,6 +570,50 @@ void ArrangementView::deleteSelectedTrack()
         edit.deleteTrack (t);
         selectedClipID = {};
     }
+}
+
+bool ArrangementView::isArmed (te::AudioTrack& t) const
+{
+    if (auto* ctx = edit.getTransport().getCurrentPlaybackContext())
+        for (auto* in : ctx->getAllInputs())
+            if (in->isRecordingEnabled (t.itemID))
+                return true;
+    return false;
+}
+
+// Arming routes the track's default input: all MIDI inputs for instrument tracks, the first audio input otherwise
+void ArrangementView::toggleArm (te::AudioTrack& t)
+{
+    auto& transport = edit.getTransport();
+    transport.ensureContextAllocated();
+    auto* ctx = transport.getCurrentPlaybackContext();
+    if (ctx == nullptr)
+        return;
+
+    const bool arm = ! isArmed (t);
+    bool instrument = false;
+    for (auto* plugin : t.pluginList)
+        instrument = instrument || plugin->isSynth();
+
+    bool usedAudio = false;
+    for (auto* in : ctx->getAllInputs())
+    {
+        const bool midi = in->owner.isMidi();
+        bool wanted = arm && (instrument ? midi : (! midi && ! usedAudio));
+        if (wanted && ! midi)
+            usedAudio = true;
+
+        if (wanted)
+        {
+            if (in->setTarget (t.itemID, true, &edit.getUndoManager()).has_value())
+                in->setRecordingEnabled (t.itemID, true);
+        }
+        else if (in->getTargets().contains (t.itemID))
+        {
+            in->setRecordingEnabled (t.itemID, false);
+        }
+    }
+    repaint();
 }
 
 void ArrangementView::selectTrackIndex (int index)
