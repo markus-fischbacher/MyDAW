@@ -325,34 +325,105 @@ void MainComponent::askForText (const juce::String& title, const juce::String& m
 
 void MainComponent::exportAudioFromChooser()
 {
-    fileChooser = std::make_unique<juce::FileChooser> ("Export audio (WAV)",
-                                                       juce::File::getSpecialLocation (juce::File::userMusicDirectory).getChildFile (getProjectName() + ".wav"),
-                                                       "*.wav");
+    auto* w = new juce::AlertWindow ("Export Audio", "Choose the format, loudness and what to render.", juce::MessageBoxIconType::NoIcon);
+    w->addComboBox ("fmt", { "WAV 16-bit", "WAV 24-bit", "AIFF 24-bit", "FLAC 24-bit", "OGG Vorbis" }, "Format");
+    w->addComboBox ("norm", { "Off", "Peak -0.3 dB", "Loudness -14 LUFS", "Loudness -9 LUFS" }, "Normalise");
+    w->addComboBox ("mode", { "Mixdown (one file)", "Stems (one file per track)" }, "Render");
+    w->addComboBox ("sr", { "44.1 kHz", "48 kHz", "96 kHz" }, "Sample rate");
+    for (auto* name : { "fmt", "norm", "mode", "sr" })
+        w->getComboBoxComponent (name)->setSelectedItemIndex (0);
+    w->addButton ("Export...", 1, juce::KeyPress (juce::KeyPress::returnKey));
+    w->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
 
-    fileChooser->launchAsync (juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::canSelectFiles
-                                  | juce::FileBrowserComponent::warnAboutOverwriting,
-                              [this] (const juce::FileChooser& fc)
-                              {
-                                  auto f = fc.getResult();
-                                  if (f == juce::File())
-                                      return;
+    w->enterModalState (true, juce::ModalCallbackFunction::create ([this, w] (int r)
+    {
+        if (r != 1)
+            return;
 
-                                  f = f.withFileExtension ("wav");
-                                  edit->getTransport().stop (false, false);
+        const int fmt = w->getComboBoxComponent ("fmt")->getSelectedItemIndex();
+        const int norm = w->getComboBoxComponent ("norm")->getSelectedItemIndex();
+        const bool stems = w->getComboBoxComponent ("mode")->getSelectedItemIndex() == 1;
+        const double sr = std::array { 44100.0, 48000.0, 96000.0 }[(size_t) w->getComboBoxComponent ("sr")->getSelectedItemIndex()];
 
-                                  // Render the arrangement from bar 1 to the end of the last clip (plus a short tail)
-                                  auto end = edit->getLength() + te::TimeDuration::fromSeconds (2.0);
-                                  juce::BigInteger tracks;
-                                  tracks.setRange (0, te::getAllTracks (*edit).size(), true);
+        auto& fm = engine.getAudioFileFormatManager();
+        juce::AudioFormat* format = fmt <= 1 ? fm.getWavFormat() : fmt == 2 ? fm.getAiffFormat() : fmt == 3 ? fm.getFlacFormat() : fm.getOggFormat();
+        const int bits = fmt == 0 ? 16 : fmt == 4 ? 16 : 24;
+        const juce::String ext = fmt <= 1 ? "wav" : fmt == 2 ? "aiff" : fmt == 3 ? "flac" : "ogg";
 
-                                  const bool ok = te::Renderer::renderToFile ("Export", f, *edit, { 0_tp, te::TimePosition() + end },
-                                                                              tracks, true, false, {}, false);
+        auto makeParams = [this, format, bits, sr, norm] (const juce::File& dest, int trackBit)
+        {
+            te::Renderer::Parameters p (*edit);
+            p.destFile = dest;
+            p.audioFormat = format;
+            p.bitDepth = bits;
+            p.sampleRateForAudio = sr;
+            p.time = { 0_tp, te::TimePosition() + (edit->getLength() + te::TimeDuration::fromSeconds (2.0)) };
+            p.usePlugins = true;
+            p.useMasterPlugins = trackBit < 0;
+            p.ditheringEnabled = bits < 24;
 
-                                  juce::AlertWindow::showMessageBoxAsync (ok ? juce::MessageBoxIconType::InfoIcon
-                                                                             : juce::MessageBoxIconType::WarningIcon,
-                                                                          "Export", ok ? "Exported " + f.getFileName()
-                                                                                       : "Export failed.");
-                              });
+            if (trackBit >= 0)
+                p.tracksToDo.setBit (trackBit);
+            else
+                p.tracksToDo.setRange (0, te::getAllTracks (*edit).size(), true);
+
+            if (norm == 1)       { p.shouldNormalise = true; p.normaliseToLevelDb = -0.3f; }
+            else if (norm >= 2)  { p.shouldNormaliseByLUFS = true; p.normaliseToLevelDb = norm == 2 ? -14.0f : -9.0f; }
+
+            return p;
+        };
+
+        edit->getTransport().stop (false, false);
+
+        if (! stems)
+        {
+            fileChooser = std::make_unique<juce::FileChooser> ("Export audio", juce::File::getSpecialLocation (juce::File::userMusicDirectory)
+                                                                                    .getChildFile (getProjectName() + "." + ext), "*." + ext);
+            fileChooser->launchAsync (juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::canSelectFiles
+                                          | juce::FileBrowserComponent::warnAboutOverwriting,
+                                      [this, ext, makeParams] (const juce::FileChooser& fc)
+                                      {
+                                          auto f = fc.getResult();
+                                          if (f == juce::File())
+                                              return;
+
+                                          f = f.withFileExtension (ext);
+                                          const auto out = te::Renderer::renderToFile ("Export", makeParams (f, -1));
+                                          juce::AlertWindow::showMessageBoxAsync (out.existsAsFile() ? juce::MessageBoxIconType::InfoIcon
+                                                                                                     : juce::MessageBoxIconType::WarningIcon,
+                                                                                  "Export", out.existsAsFile() ? "Exported " + out.getFileName() : "Export failed.");
+                                      });
+        }
+        else
+        {
+            fileChooser = std::make_unique<juce::FileChooser> ("Folder for stems", juce::File::getSpecialLocation (juce::File::userMusicDirectory));
+            fileChooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectDirectories,
+                                      [this, ext, makeParams] (const juce::FileChooser& fc)
+                                      {
+                                          auto dir = fc.getResult();
+                                          if (! dir.isDirectory())
+                                              return;
+
+                                          int done = 0;
+                                          auto all = te::getAllTracks (*edit);
+                                          for (int i = 0; i < all.size(); ++i)
+                                          {
+                                              auto* t = dynamic_cast<te::AudioTrack*> (all[i]);
+                                              if (t == nullptr || t->getClips().isEmpty())
+                                                  continue;
+
+                                              auto name = juce::String (++done).paddedLeft ('0', 2) + " " + juce::File::createLegalFileName (t->getName()) + "." + ext;
+                                              if (te::Renderer::renderToFile ("Stem", makeParams (dir.getChildFile (name), i)).existsAsFile())
+                                                  continue;
+                                              --done;
+                                          }
+
+                                          juce::AlertWindow::showMessageBoxAsync (done > 0 ? juce::MessageBoxIconType::InfoIcon : juce::MessageBoxIconType::WarningIcon,
+                                                                                  "Export", done > 0 ? "Exported " + juce::String (done) + " stems to " + dir.getFileName()
+                                                                                                     : "No stems exported.");
+                                      });
+        }
+    }), true);
 }
 
 void MainComponent::setPianoRollVisible (bool shouldBeVisible)
