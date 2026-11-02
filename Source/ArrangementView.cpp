@@ -677,6 +677,30 @@ void ArrangementView::addTrack (bool instrument)
     repaint();
 }
 
+void ArrangementView::addReturnTrack()
+{
+    edit.getUndoManager().beginNewTransaction();
+
+    if (auto t = edit.insertNewAudioTrack (te::TrackInsertPoint::getEndOfTracks (edit), nullptr))
+    {
+        t->setName ("Return A");
+
+        if (auto ret = edit.getPluginCache().createNewPlugin (te::AuxReturnPlugin::xmlTypeName, {}))
+        {
+            t->pluginList.insertPlugin (ret, 0, nullptr);
+            if (auto* r = dynamic_cast<te::AuxReturnPlugin*> (ret.get()))
+                r->busNumber = 0;
+        }
+
+        if (auto rev = edit.getPluginCache().createNewPlugin (te::ReverbPlugin::xmlTypeName, {}))
+            t->pluginList.insertPlugin (rev, 1, nullptr);
+
+        selectedTrackID = t->itemID;
+    }
+
+    repaint();
+}
+
 void ArrangementView::deleteSelectedTrack()
 {
     if (auto* t = getSelectedTrack())

@@ -89,6 +89,27 @@ public:
         pan.setColour (juce::Slider::thumbColourId, Palette::accent);
         addAndMakeVisible (pan);
 
+        if (track != nullptr && track->pluginList.findFirstPluginOfType<te::AuxReturnPlugin>() == nullptr)
+        {
+            send.setSliderStyle (juce::Slider::LinearHorizontal);
+            send.setTextBoxStyle (juce::Slider::NoTextBox, false, 0, 0);
+            send.setRange (0.0, 1.0, 0.0);
+            send.setTooltip ("Send to bus A");
+            send.setColour (juce::Slider::thumbColourId, juce::Colour (0xff58b368));
+            send.setColour (juce::Slider::trackColourId, juce::Colour (0xff58b368).withAlpha (0.5f));
+            if (auto* sp = track->pluginList.findFirstPluginOfType<te::AuxSendPlugin>())
+                send.setValue (te::decibelsToVolumeFaderPosition (sp->getGainDb()), juce::dontSendNotification);
+            send.onValueChange = [this] { applySend ((float) send.getValue()); };
+            addAndMakeVisible (send);
+        }
+
+        if (track != nullptr)
+        {
+            outButton.onClick = [this] { showOutputMenu(); };
+            addAndMakeVisible (outButton);
+            refreshOutputText();
+        }
+
         fader.setSliderStyle (juce::Slider::LinearVertical);
         fader.setTextBoxStyle (juce::Slider::TextBoxBelow, false, stripWidth - 40, 18);
         fader.setRange (0.0, 1.0, 0.0);
@@ -160,10 +181,14 @@ public:
         r.removeFromTop (4);
         name.setBounds (r.removeFromTop (20));
         pan.setBounds (r.removeFromTop (22));
+        if (send.isShowing() || send.getParentComponent() == this)
+            send.setBounds (r.removeFromTop (18));
         fx.setBounds (r.removeFromBottom (22).reduced (1));
         r.removeFromBottom (2);
         if (track != nullptr)
         {
+            outButton.setBounds (r.removeFromBottom (20).reduced (1));
+            r.removeFromBottom (2);
             auto row = r.removeFromBottom (24);
             mute.setBounds (row.removeFromLeft (row.getWidth() / 2).reduced (1));
             solo.setBounds (row.reduced (1));
@@ -181,6 +206,62 @@ public:
     }
 
 private:
+    void applySend (float pos)
+    {
+        auto* sp = track->pluginList.findFirstPluginOfType<te::AuxSendPlugin>();
+
+        if (sp == nullptr)
+        {
+            if (pos <= 0.001f)
+                return;
+
+            auto p = edit.getPluginCache().createNewPlugin (te::AuxSendPlugin::xmlTypeName, {});
+            track->pluginList.insertPlugin (p, -1, nullptr);
+            sp = track->pluginList.findFirstPluginOfType<te::AuxSendPlugin>();
+            if (sp != nullptr)
+                sp->busNumber = 0;
+        }
+
+        if (sp != nullptr)
+            sp->setGainDb (pos <= 0.001f ? -100.0f : te::volumeFaderPositionToDB (pos));
+    }
+
+    void refreshOutputText()
+    {
+        auto* dest = track->getOutput().getDestinationTrack();
+        outButton.setButtonText (dest != nullptr ? "> " + dest->getName() : juce::String ("> Master"));
+    }
+
+    void showOutputMenu()
+    {
+        juce::PopupMenu m;
+        m.addItem (1, "Master", true, track->getOutput().getDestinationTrack() == nullptr);
+        m.addSeparator();
+
+        auto tracks = te::getAudioTracks (edit);
+        for (int i = 0; i < tracks.size(); ++i)
+        {
+            auto* t = tracks[i];
+            const bool ok = t != track.get() && ! t->getOutput().feedsInto (track.get());
+            m.addItem (10 + i, "Group: " + t->getName(), ok, track->getOutput().getDestinationTrack() == t);
+        }
+
+        m.showMenuAsync ({}, [this] (int r)
+        {
+            if (r == 0)
+                return;
+
+            edit.getUndoManager().beginNewTransaction();
+
+            if (r == 1)
+                track->getOutput().setOutputToDefaultDevice (false);
+            else if (auto* dest = te::getAudioTracks (edit)[r - 10])
+                track->getOutput().setOutputToTrack (dest);
+
+            refreshOutputText();
+        });
+    }
+
     void timerCallback() override
     {
         meterComp.setLevels (client.getAndClearAudioLevel (0).dB, client.getAndClearAudioLevel (1).dB);
@@ -208,7 +289,8 @@ private:
     te::LevelMeasurer::Client client;
 
     juce::Label name;
-    juce::Slider pan, fader;
+    juce::Slider pan, fader, send;
+    juce::TextButton outButton;
     juce::TextButton mute { "M" }, solo { "S" }, fx { "FX" };
     Meter meterComp;
 };

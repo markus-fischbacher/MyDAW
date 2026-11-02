@@ -150,6 +150,25 @@ MainComponent::MainComponent()
         }
     }
 
+    // --demo-bus: a return track, a send on track 1, track 2 routed into track 3
+    if (args.contains ("--demo-bus"))
+    {
+        arrangement->addReturnTrack();
+        auto tracks = te::getAudioTracks (*edit);
+        if (auto p = edit->getPluginCache().createNewPlugin (te::AuxSendPlugin::xmlTypeName, {}))
+        {
+            tracks[0]->pluginList.insertPlugin (p, -1, nullptr);
+            if (auto* sp = tracks[0]->pluginList.findFirstPluginOfType<te::AuxSendPlugin>())
+            {
+                sp->busNumber = 0;
+                sp->setGainDb (-6.0f);
+            }
+        }
+        tracks[1]->getOutput().setOutputToTrack (tracks[2]);
+        tracks[2]->setName ("Drum Bus");
+        setMixerVisible (true);
+    }
+
     // --snapshot <file.png>: render the window to an image once thumbnails are ready, then quit.
     // Handy for visual checks and CI without touching the screen.
     const int snapIndex = args.indexOf ("--snapshot");
@@ -560,6 +579,7 @@ juce::PopupMenu MainComponent::getMenuForIndex (int index, const juce::String&)
     {
         add (addAudioTrack,      "Add Audio Track",       "cmd + T");
         add (addInstrumentTrack, "Add Instrument Track",  "shift + cmd + T");
+        add (addReturnTrack,     "Add Return Track (Send Bus)", "");
         add (deleteTrack,        "Delete Selected Track", "");
         m.addSeparator();
         add (toggleAutomation,   "Show/Hide Automation",  "cmd + A");
@@ -597,6 +617,7 @@ void MainComponent::menuItemSelected (int id, int)
         case exportAudio:    exportAudioFromChooser(); break;
         case addAudioTrack:  arrangement->addTrack (false); break;
         case addInstrumentTrack: arrangement->addTrack (true); break;
+        case addReturnTrack:     arrangement->addReturnTrack(); break;
         case deleteTrack:    arrangement->deleteSelectedTrack(); break;
         case toggleAutomation: arrangement->toggleAutomationOnSelectedTrack(); break;
         case toggleMixer:    setMixerVisible (! mixerVisible); break;

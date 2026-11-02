@@ -26,7 +26,7 @@ public:
 
 private:
     enum MenuIDs { newProject = 1, openProject, saveProject, saveProjectAs, importAudio, exportAudio, undo, redo,
-                   addAudioTrack, addInstrumentTrack, deleteTrack, toggleAutomation,
+                   addAudioTrack, addInstrumentTrack, addReturnTrack, deleteTrack, toggleAutomation,
                    toggleMixer, toggleLoop, toggleClick, trackPlugins,
                    insertTempo, resetTempoMap, setTimeSig, insertTimeSig, togglePunch, masterPlugins };
 
