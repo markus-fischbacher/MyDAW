@@ -157,6 +157,11 @@ private:
     std::set<te::EditItemID> marqueeBase;
     bool isClipSelected (const te::Clip& c) const   { return c.itemID == selectedClipID || multiSel.count (c.itemID) > 0; }
     void deleteSelectedClips();
+    std::vector<te::Clip*> selectedClips() const;
+    struct ClipboardEntry { juce::ValueTree state; int track; double offset; };
+    std::vector<ClipboardEntry> clipClipboard;
+    bool copyClips();
+    void pasteClips();
     void saveLayout();
     void loadLayout();
     void compMouseDown (const juce::MouseEvent&, te::AudioTrack&, int take);

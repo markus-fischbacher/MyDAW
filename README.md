@@ -53,6 +53,8 @@ Optional args: a `.tracktionedit` project to open, audio files (placed on consec
 | Edit tempo / time-signature markers | Double-click a marker in the ruler, or right-click the ruler (edit, move to playhead, delete, add) |
 | Rebind shortcuts | View menu > Keyboard Shortcuts... (conflicts are rejected) |
 | Select several clips | Drag a rectangle in empty space, or Shift/Cmd-click; drag one to move all, Delete removes all |
+| Select all / copy / cut / paste clips | Cmd+A, Cmd+C, Cmd+X, Cmd+V (pastes at the playhead); Cmd+D duplicates the selection |
+| Recording latency offset | Audio Settings dialog, slider at the bottom |
 | Lane layout | Lane heights, collapsed lanes and take lanes are saved with the project |
 | Consolidate clip | Clip right-click menu: Consolidate in Place renders the clip with its effects (turn Warp off first) |
 | Move tempo / time-sig markers | Drag a marker in the ruler (time signatures snap to bars) |
@@ -66,7 +68,7 @@ Optional args: a `.tracktionedit` project to open, audio files (placed on consec
 | Add audio / instrument track | Cmd+T / Shift+Cmd+T, or right-click a track header |
 | Rename / delete track | Double-click name / right-click header (or Track menu) |
 | Mute / solo | M / S buttons in header or mixer |
-| Automation (volume / pan) | A button in header (Cmd+A), Vol/Pan toggles parameter; click adds a point, drag moves, Alt-click or right-click deletes |
+| Automation (volume / pan) | A button in header (Cmd+Alt+A), Vol/Pan toggles parameter; click adds a point, drag moves, Alt-click or right-click deletes |
 | Record | R button arms a track (audio input, or MIDI inputs on instrument tracks); Rec button / Cmd+R records armed tracks; stop to finish |
 | Plug-ins (built-in FX, AU/VST3, instruments) | FX button in a mixer strip (master strip too, or Project > Master Plug-ins), or Cmd+P for the selected track; the menu also scans for plug-ins and opens editors |
 | Tempo change / remove | Project menu: Insert Tempo Change at Playhead, Remove Tempo Changes (markers show in the ruler) |

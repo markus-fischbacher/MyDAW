@@ -2510,6 +2510,39 @@ bool ArrangementView::keyPressed (const juce::KeyPress& key)
         return true;
     }
 
+    if (key == juce::KeyPress ('a', cmd, 0))
+    {
+        multiSel.clear();
+        for (auto* t : te::getAudioTracks (edit))
+            for (auto* cl : t->getClips())
+                multiSel.insert (cl->itemID);
+        selectedClipID = {};
+        repaint();
+        return true;
+    }
+
+    if (key == juce::KeyPress ('c', cmd, 0) || key == juce::KeyPress ('x', cmd, 0))
+    {
+        if (copyClips())
+        {
+            if (key.getKeyCode() == 'x')
+                deleteSelectedClips();
+            return true;
+        }
+    }
+
+    if (key == juce::KeyPress ('v', cmd, 0) && ! clipClipboard.empty())
+    {
+        pasteClips();
+        return true;
+    }
+
+    if (! multiSel.empty() && key == juce::KeyPress ('d', cmd, 0))
+    {
+        duplicateSelectedClip();
+        return true;
+    }
+
     if (! multiSel.empty() && (key == juce::KeyPress::deleteKey || key == juce::KeyPress::backspaceKey))
     {
         deleteSelectedClips();
@@ -2769,8 +2802,118 @@ int ArrangementView::fadeHandleX (te::WaveAudioClip& wave, bool fadeIn, juce::Re
     return juce::jmin (b.getRight() - 10, (int) timeToX (pos.getEnd() - wave.getFadeOut()));
 }
 
+std::vector<te::Clip*> ArrangementView::selectedClips() const
+{
+    std::vector<te::Clip*> out;
+
+    if (multiSel.empty())
+    {
+        if (auto* c = getSelectedClip())
+            out.push_back (c);
+    }
+    else
+        for (auto id : multiSel)
+            if (auto* c = te::findClipForID (edit, id))
+                out.push_back (c);
+
+    return out;
+}
+
+bool ArrangementView::copyClips()
+{
+    auto clips = selectedClips();
+
+    if (clips.empty())
+        return false;
+
+    double first = 1.0e12;
+    for (auto* c : clips)
+        first = juce::jmin (first, c->getPosition().getStart().inSeconds());
+
+    const auto tracks = te::getAudioTracks (edit);
+    clipClipboard.clear();
+
+    for (auto* c : clips)
+        clipClipboard.push_back ({ c->state.createCopy(), tracks.indexOf (dynamic_cast<te::AudioTrack*> (c->getTrack())),
+                                   c->getPosition().getStart().inSeconds() - first });
+    return true;
+}
+
+void ArrangementView::pasteClips()
+{
+    const auto tracks = te::getAudioTracks (edit);
+    const auto at = edit.getTransport().getPosition();
+    selectedClipID = {};
+    multiSel.clear();
+    edit.getUndoManager().beginNewTransaction();
+
+    int base = 0;                                       // paste on the selected track if the copy came from one track
+    bool singleTrack = true;
+    for (auto& e : clipClipboard)
+        singleTrack = singleTrack && e.track == clipClipboard.front().track;
+    if (singleTrack)
+        if (auto* st = getSelectedTrack())
+            base = tracks.indexOf (st) - clipClipboard.front().track;
+
+    for (auto& e : clipClipboard)
+    {
+        const int ti = e.track + base;
+
+        if (! juce::isPositiveAndBelow (ti, tracks.size()))
+            continue;
+
+        auto state = e.state.createCopy();
+        te::EditItemID::remapIDs (state, nullptr, edit);
+
+        if (auto* inserted = tracks[ti]->insertClipWithState (state))
+        {
+            inserted->setStart (at + te::TimeDuration::fromSeconds (e.offset), false, true);
+            multiSel.insert (inserted->itemID);
+        }
+    }
+
+    if (multiSel.size() == 1)
+    {
+        selectedClipID = *multiSel.begin();
+        multiSel.clear();
+    }
+
+    repaint();
+}
+
 void ArrangementView::duplicateSelectedClip()
 {
+    if (! multiSel.empty())                              // duplicate the group right after itself
+    {
+        auto clips = selectedClips();
+        double first = 1.0e12, last = 0.0;
+        for (auto* c : clips)
+        {
+            first = juce::jmin (first, c->getPosition().getStart().inSeconds());
+            last = juce::jmax (last, c->getPosition().getEnd().inSeconds());
+        }
+
+        const auto shift = te::TimeDuration::fromSeconds (last - first);
+        edit.getUndoManager().beginNewTransaction();
+        std::set<te::EditItemID> added;
+
+        for (auto* c : clips)
+            if (auto* track = dynamic_cast<te::ClipTrack*> (c->getTrack()))
+                if (auto copy = te::duplicateClip (*c))
+                {
+                    auto state = copy->state;
+                    if (auto* ins = track->insertClipWithState (state))
+                    {
+                        ins->setStart (c->getPosition().getStart() + shift, false, true);
+                        added.insert (ins->itemID);
+                    }
+                }
+
+        multiSel = added;
+        repaint();
+        return;
+    }
+
     auto* clip = getSelectedClip();
 
     if (clip == nullptr)

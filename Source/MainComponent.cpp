@@ -289,9 +289,46 @@ void MainComponent::buildViews()
         juce::DialogWindow::LaunchOptions o;
         o.dialogTitle = "Audio Settings";
         o.dialogBackgroundColour = Palette::panel;
-        o.content.setOwned (new juce::AudioDeviceSelectorComponent (engine.getDeviceManager().deviceManager,
-                                                                     0, 512, 1, 512, true, true, true, false));
-        o.content->setSize (500, 420);
+        struct Panel : juce::Component
+        {
+            Panel (te::Engine& e)
+                : engine (e), selector (e.getDeviceManager().deviceManager, 0, 512, 1, 512, true, true, true, false)
+            {
+                addAndMakeVisible (selector);
+                addAndMakeVisible (label);
+                addAndMakeVisible (offset);
+                label.setText ("Recording latency offset (ms) - shifts recorded audio earlier/later to compensate interface delay", juce::dontSendNotification);
+                label.setFont (juce::FontOptions (12.0f));
+                offset.setRange (-250.0, 250.0, 0.5);
+                offset.setTextValueSuffix (" ms");
+                offset.setTextBoxStyle (juce::Slider::TextBoxRight, false, 80, 22);
+
+                auto devices = engine.getDeviceManager().getWaveInputDevices();
+                offset.setValue (devices.empty() ? 0.0 : devices.front()->getRecordAdjustmentMs(), juce::dontSendNotification);
+                offset.onValueChange = [this]
+                {
+                    for (auto& d : engine.getDeviceManager().getWaveInputDevices())
+                        d->setRecordAdjustmentMs (offset.getValue());
+                };
+                setSize (500, 480);
+            }
+
+            void resized() override
+            {
+                auto r = getLocalBounds();
+                auto bottom = r.removeFromBottom (70).reduced (8, 4);
+                label.setBounds (bottom.removeFromTop (30));
+                offset.setBounds (bottom.removeFromTop (28));
+                selector.setBounds (r);
+            }
+
+            te::Engine& engine;
+            juce::AudioDeviceSelectorComponent selector;
+            juce::Label label;
+            juce::Slider offset { juce::Slider::LinearHorizontal, juce::Slider::TextBoxRight };
+        };
+
+        o.content.setOwned (new Panel (engine));
         o.launchAsync();
     };
 
@@ -1003,7 +1040,7 @@ void MainComponent::loadBindings()
         { exportAudio,         "Export Audio",             { 'e', cmd | shift, 0 } },
         { addAudioTrack,       "Add Audio Track",          { 't', cmd, 0 } },
         { addInstrumentTrack,  "Add Instrument Track",     { 't', cmd | shift, 0 } },
-        { toggleAutomation,    "Show/Hide Automation",     { 'a', cmd, 0 } },
+        { toggleAutomation,    "Show/Hide Automation",     { 'a', cmd | juce::ModifierKeys::altModifier, 0 } },
         { expandAutomation,    "Expand All Automation",    { 'a', cmd | shift, 0 } },
         { toggleMixer,         "Show/Hide Mixer",          { 'm', cmd, 0 } },
         { toggleBrowser,       "Show/Hide Browser",        { 'b', cmd, 0 } },
