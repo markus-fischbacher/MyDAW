@@ -164,6 +164,17 @@ ArrangementView::ClipHit ArrangementView::hitTestClip (juce::Point<int> p) const
         auto* clip = clips.getUnchecked (i);
         const auto b = getClipBounds (*clip, index);
 
+        if (auto* wave = dynamic_cast<te::WaveAudioClip*> (clip))
+        {
+            const int hy = b.getY() + clipHeaderHeight / 2;
+
+            if (std::abs (p.y - hy) <= 6)
+            {
+                if (std::abs (p.x - fadeHandleX (*wave, true, b)) <= 6)  return { clip, DragMode::fadeIn };
+                if (std::abs (p.x - fadeHandleX (*wave, false, b)) <= 6) return { clip, DragMode::fadeOut };
+            }
+        }
+
         if (b.contains (p))
         {
             const int grab = juce::jmin (edgeGrabWidth, b.getWidth() / 4);
@@ -265,7 +276,16 @@ void ArrangementView::paintClip (juce::Graphics& g, te::Clip& clip, juce::Rectan
 {
     const bool selected = clip.itemID == selectedClipID;
     auto* midi = dynamic_cast<te::MidiClip*> (&clip);
-    const auto colour = midi != nullptr ? Palette::midiClip : Palette::clip;
+    auto colour = midi != nullptr ? Palette::midiClip : Palette::clip;
+
+    if (clip.state.hasProperty ("arrColour"))
+        colour = juce::Colour::fromString (clip.state["arrColour"].toString());
+
+    auto* waveClip = dynamic_cast<te::WaveAudioClip*> (&clip);
+    const bool muted = waveClip != nullptr && waveClip->isMuted();
+
+    if (muted)
+        colour = colour.withSaturation (0.1f).darker (0.3f);
 
     g.setColour (colour.withAlpha (0.35f));
     g.fillRoundedRectangle (b.toFloat(), 3.0f);
@@ -276,7 +296,19 @@ void ArrangementView::paintClip (juce::Graphics& g, te::Clip& clip, juce::Rectan
 
     g.setColour (juce::Colours::black.withAlpha (0.85f));
     g.setFont (juce::FontOptions (11.5f));
-    g.drawText (clip.getName(), header.reduced (5, 0), juce::Justification::centredLeft, true);
+    juce::String label = clip.getName();
+
+    if (waveClip != nullptr)
+    {
+        if (waveClip->getAutoTempo())            label << "  [warp]";
+        if (waveClip->getIsReversed())           label << "  [rev]";
+        if (waveClip->getTransposeSemiTones (false) != 0)
+            label << "  " << juce::String::formatted ("%+d st", waveClip->getTransposeSemiTones (false));
+        if (std::abs (waveClip->getGainDB()) > 0.05f)
+            label << "  " << juce::String (waveClip->getGainDB(), 1) << " dB";
+    }
+
+    g.drawText (label, header.reduced (14, 0), juce::Justification::centredLeft, true);
 
     if (midi != nullptr)
     {
@@ -320,7 +352,24 @@ void ArrangementView::paintClip (juce::Graphics& g, te::Clip& clip, juce::Rectan
 
             auto body = b.withTrimmedTop (clipHeaderHeight).reduced (0, 2);
             g.setColour (colour.brighter (0.4f));
-            thumb->drawChannels (g, body, sourceRange, 1.0f);
+            thumb->drawChannels (g, body, sourceRange, juce::Decibels::decibelsToGain (wave->getGainDB()));
+        }
+        {
+            auto body = b.withTrimmedTop (clipHeaderHeight).reduced (0, 2);
+            // Fade shapes + handles
+            const auto fin = fadeHandleX (*wave, true, b), fout = fadeHandleX (*wave, false, b);
+            g.setColour (juce::Colours::black.withAlpha (0.35f));
+            juce::Path fades;
+            if (fin > b.getX() + 10)
+                fades.addTriangle ((float) b.getX(), (float) body.getY(), (float) fin, (float) body.getY(), (float) b.getX(), (float) body.getBottom());
+            if (fout < b.getRight() - 10)
+                fades.addTriangle ((float) b.getRight(), (float) body.getY(), (float) fout, (float) body.getY(), (float) b.getRight(), (float) body.getBottom());
+            g.fillPath (fades);
+
+            g.setColour (juce::Colours::white.withAlpha (0.9f));
+            const float hy = (float) b.getY() + clipHeaderHeight * 0.5f;
+            g.fillEllipse ((float) fin - 3.0f, hy - 3.0f, 6.0f, 6.0f);
+            g.fillEllipse ((float) fout - 3.0f, hy - 3.0f, 6.0f, 6.0f);
         }
     }
 
@@ -900,7 +949,9 @@ void ArrangementView::mouseMove (const juce::MouseEvent& e)
     switch (hitTestClip (e.getPosition()).mode)
     {
         case DragMode::trimStart:
-        case DragMode::trimEnd:   setMouseCursor (juce::MouseCursor::LeftRightResizeCursor); break;
+        case DragMode::trimEnd:
+        case DragMode::fadeIn:
+        case DragMode::fadeOut:   setMouseCursor (juce::MouseCursor::LeftRightResizeCursor); break;
         case DragMode::move:      setMouseCursor (juce::MouseCursor::DraggingHandCursor); break;
         case DragMode::none:
         case DragMode::automation:
@@ -969,6 +1020,14 @@ void ArrangementView::mouseDown (const juce::MouseEvent& e)
     }
 
     selectedClipID = hit.clip->itemID;
+
+    if (e.mods.isPopupMenu())
+    {
+        repaint();
+        showClipMenu (hit.clip->itemID);
+        return;
+    }
+
     dragClipID = hit.clip->itemID;
     dragMode = hit.mode;
 
@@ -1063,8 +1122,32 @@ void ArrangementView::mouseDrag (const juce::MouseEvent& e)
             break;
         }
 
+        case DragMode::fadeIn:
+        case DragMode::fadeOut:
+        {
+            if (auto* wave = dynamic_cast<te::WaveAudioClip*> (clip))
+            {
+                const auto pos = clip->getPosition();
+                const auto t = beatToTime (juce::jmax (0.0, xToBeat (e.x)));
+
+                if (dragMode == DragMode::fadeIn)
+                {
+                    const auto len = juce::jlimit (0.0, (pos.getLength() - wave->getFadeOut()).inSeconds(), (t - pos.getStart()).inSeconds());
+                    wave->setFadeIn (te::TimeDuration::fromSeconds (len));
+                }
+                else
+                {
+                    const auto len = juce::jlimit (0.0, (pos.getLength() - wave->getFadeIn()).inSeconds(), (pos.getEnd() - t).inSeconds());
+                    wave->setFadeOut (te::TimeDuration::fromSeconds (len));
+                }
+            }
+            break;
+        }
+
         case DragMode::none:
         case DragMode::scrub:
+        case DragMode::automation:
+        case DragMode::loopRange:
             break;
     }
 }
@@ -1182,6 +1265,12 @@ bool ArrangementView::keyPressed (const juce::KeyPress& key)
         return true;
     }
 
+    if (clip != nullptr && key == juce::KeyPress ('d', juce::ModifierKeys::commandModifier, 0))
+    {
+        duplicateSelectedClip();
+        return true;
+    }
+
     if (key == juce::KeyPress ('=', juce::ModifierKeys::commandModifier, 0))
     {
         zoomAround (1.5, (float) headerWidth);
@@ -1239,4 +1328,225 @@ void ArrangementView::insertAudioFile (const juce::File& file, int trackIndex, t
         selectedClipID = clip->itemID;
 
     repaint();
+}
+
+//==============================================================================
+// Clip operations
+
+int ArrangementView::fadeHandleX (te::WaveAudioClip& wave, bool fadeIn, juce::Rectangle<int> b) const
+{
+    const auto pos = wave.getPosition();
+
+    if (fadeIn)
+        return juce::jmax (b.getX() + 10, (int) timeToX (pos.getStart() + wave.getFadeIn()));
+
+    return juce::jmin (b.getRight() - 10, (int) timeToX (pos.getEnd() - wave.getFadeOut()));
+}
+
+void ArrangementView::duplicateSelectedClip()
+{
+    auto* clip = getSelectedClip();
+
+    if (clip == nullptr)
+        return;
+
+    auto* track = dynamic_cast<te::ClipTrack*> (clip->getTrack());
+
+    if (track == nullptr)
+        return;
+
+    edit.getUndoManager().beginNewTransaction();
+
+    if (auto copy = te::duplicateClip (*clip))
+    {
+        auto state = copy->state;
+        const auto end = clip->getPosition().getEnd();
+
+        if (auto* inserted = track->insertClipWithState (state))
+        {
+            inserted->setStart (end, false, true);
+            selectedClipID = inserted->itemID;
+        }
+    }
+
+    repaint();
+}
+
+static void askText (const juce::String& title, const juce::String& initial, std::function<void (juce::String)> done)
+{
+    auto* w = new juce::AlertWindow (title, {}, juce::MessageBoxIconType::NoIcon);
+    w->addTextEditor ("t", initial);
+    w->addButton ("OK", 1, juce::KeyPress (juce::KeyPress::returnKey));
+    w->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
+    w->enterModalState (true, juce::ModalCallbackFunction::create ([w, done] (int r)
+                        {
+                            if (r == 1)
+                                done (w->getTextEditorContents ("t"));
+                        }), true);
+}
+
+void ArrangementView::showClipMenu (te::EditItemID id)
+{
+    auto* clip = te::findClipForID (edit, id);
+
+    if (clip == nullptr)
+        return;
+
+    auto* wave = dynamic_cast<te::WaveAudioClip*> (clip);
+    const bool isMidi = dynamic_cast<te::MidiClip*> (clip) != nullptr;
+
+    static const juce::Colour colours[] = { juce::Colour (0xff4f8fd8), juce::Colour (0xff58b368), juce::Colour (0xffd8704f), juce::Colour (0xffc9a93a),
+                                            juce::Colour (0xff9a6fd8), juce::Colour (0xffd86fa8), juce::Colour (0xff4fc9c9), juce::Colour (0xff9a9fa8) };
+    static const char* colourNames[] = { "Blue", "Green", "Orange", "Yellow", "Purple", "Pink", "Teal", "Grey" };
+    static const float gains[] = { -12.0f, -6.0f, -3.0f, 0.0f, 3.0f, 6.0f };
+    static const double fades[] = { 0.0, 0.01, 0.05, 0.1, 0.25, 0.5, 1.0 };
+    static const int transposes[] = { -12, -7, -5, -2, -1, 0, 1, 2, 5, 7, 12 };
+
+    juce::PopupMenu m;
+    m.addItem (1, "Rename...");
+    m.addItem (2, "Split at Playhead");
+    m.addItem (3, "Duplicate");
+    m.addItem (4, "Delete");
+
+    juce::PopupMenu colourMenu;
+    for (int i = 0; i < 8; ++i)
+        colourMenu.addColouredItem (100 + i, colourNames[i], colours[i]);
+    m.addSubMenu ("Colour", colourMenu);
+
+    if (wave != nullptr)
+    {
+        m.addSeparator();
+        m.addItem (5, "Mute Clip", true, wave->isMuted());
+        m.addItem (6, "Reverse", true, wave->getIsReversed());
+
+        juce::PopupMenu gainMenu, fadeInMenu, fadeOutMenu, transposeMenu;
+        for (int i = 0; i < 6; ++i)
+            gainMenu.addItem (200 + i, juce::String (gains[i], 0) + " dB", true, std::abs (wave->getGainDB() - gains[i]) < 0.05f);
+        for (int i = 0; i < 7; ++i)
+        {
+            const auto label = i == 0 ? juce::String ("None") : juce::String ((int) (fades[i] * 1000)) + " ms";
+            fadeInMenu.addItem (300 + i, label);
+            fadeOutMenu.addItem (400 + i, label);
+        }
+        for (int i = 0; i < 11; ++i)
+            transposeMenu.addItem (500 + i, juce::String::formatted ("%+d semitones", transposes[i]), true,
+                                   wave->getTransposeSemiTones (false) == transposes[i]);
+
+        m.addSubMenu ("Gain", gainMenu);
+        m.addSubMenu ("Fade In", fadeInMenu);
+        m.addSubMenu ("Fade Out", fadeOutMenu);
+        m.addSeparator();
+        m.addItem (7, "Warp to Project Tempo", true, wave->getAutoTempo());
+        m.addItem (8, "Detect Source Tempo");
+        m.addSubMenu ("Transpose", transposeMenu);
+    }
+    else if (isMidi)
+    {
+        m.addSeparator();
+        m.addItem (9, "Edit in Piano Roll");
+    }
+
+    m.showMenuAsync ({}, [this, id] (int r)
+    {
+        auto* c = te::findClipForID (edit, id);
+
+        if (c == nullptr || r == 0)
+            return;
+
+        auto* w = dynamic_cast<te::WaveAudioClip*> (c);
+        edit.getUndoManager().beginNewTransaction();
+
+        if (r == 1)
+        {
+            askText ("Rename clip", c->getName(), [this, id] (juce::String name)
+            {
+                if (auto* cc = te::findClipForID (edit, id))
+                {
+                    edit.getUndoManager().beginNewTransaction();
+                    cc->setName (name.trim());
+                    repaint();
+                }
+            });
+        }
+        else if (r == 2)
+        {
+            const auto t = edit.getTransport().getPosition();
+            if (auto* track = dynamic_cast<te::ClipTrack*> (c->getTrack()))
+                if (c->getPosition().time.containsInclusive (t))
+                    track->splitClip (*c, t);
+        }
+        else if (r == 3)  duplicateSelectedClip();
+        else if (r == 4)  { c->removeFromParent(); selectedClipID = {}; }
+        else if (r == 9 && onOpenMidiClip) onOpenMidiClip (id);
+        else if (r >= 100 && r < 108)
+        {
+            static const juce::uint32 argb[] = { 0xff4f8fd8, 0xff58b368, 0xffd8704f, 0xffc9a93a, 0xff9a6fd8, 0xffd86fa8, 0xff4fc9c9, 0xff9a9fa8 };
+            c->state.setProperty ("arrColour", juce::Colour (argb[r - 100]).toString(), &edit.getUndoManager());
+        }
+        else if (w != nullptr)
+        {
+            if (r == 5)       w->setMuted (! w->isMuted());
+            else if (r == 6)  w->setIsReversed (! w->getIsReversed());
+            else if (r >= 200 && r < 206)
+            {
+                static const float g[] = { -12.0f, -6.0f, -3.0f, 0.0f, 3.0f, 6.0f };
+                w->setGainDB (g[r - 200]);
+            }
+            else if ((r >= 300 && r < 307) || (r >= 400 && r < 407))
+            {
+                static const double f[] = { 0.0, 0.01, 0.05, 0.1, 0.25, 0.5, 1.0 };
+                const bool in = r < 400;
+                const auto len = te::TimeDuration::fromSeconds (f[r - (in ? 300 : 400)]);
+                if (in) w->setFadeIn (len); else w->setFadeOut (len);
+            }
+            else if (r >= 500 && r < 511)
+            {
+                static const int t[] = { -12, -7, -5, -2, -1, 0, 1, 2, 5, 7, 12 };
+                w->setTranspose (t[r - 500]);
+            }
+            else if (r == 8)
+            {
+                w->performTempoDetect();
+            }
+            else if (r == 7)
+            {
+                setClipWarp (*w, ! w->getAutoTempo());
+            }
+        }
+
+        repaint();
+    });
+}
+
+void ArrangementView::setClipWarp (te::WaveAudioClip& w, bool on)
+{
+    if (w.getAutoTempo() == on)
+        return;
+
+    const auto info = w.getAudioFile().getInfo();
+
+    if (on && w.getLoopInfo().getBpm (info) <= 0.0)
+        w.performTempoDetect();
+
+    const auto sourceBpm = w.getLoopInfo().getBpm (info);
+    const auto projectBpm = edit.tempoSequence.getBpmAt (w.getPosition().getStart());
+
+    // Keep the same musical content: stretching the audio also stretches the clip on the timeline
+    if (sourceBpm > 0.0 && projectBpm > 0.0)
+    {
+        const auto pos = w.getPosition();
+        const auto factor = on ? sourceBpm / projectBpm : projectBpm / sourceBpm;
+        w.setAutoTempo (on);
+
+        if (on)
+            w.setTimeStretchMode (te::TimeStretcher::soundtouchBetter);
+
+        w.setEnd (pos.getStart() + te::TimeDuration::fromSeconds (pos.getLength().inSeconds() * factor), false);
+        return;
+    }
+
+    w.setAutoTempo (on);
+
+    if (on)
+        w.setTimeStretchMode (te::TimeStretcher::soundtouchBetter);
 }

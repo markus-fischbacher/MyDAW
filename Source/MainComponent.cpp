@@ -113,6 +113,43 @@ MainComponent::MainComponent()
         edit->getTransport().looping = true;
     }
 
+    // --demo-clip: a generated 2s drum-ish loop with fades, gain, colour and warp at 100 BPM
+    if (args.contains ("--demo-clip"))
+    {
+        const auto wav = juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory).getChildFile ("Arranger").getChildFile ("demo_loop.wav");
+        wav.getParentDirectory().createDirectory();
+        wav.deleteFile();
+        {
+            juce::WavAudioFormat fmt;
+            std::unique_ptr<juce::AudioFormatWriter> w (fmt.createWriterFor (new juce::FileOutputStream (wav), 44100.0, 1, 16, {}, 0));
+            juce::AudioBuffer<float> b (1, 88200);
+            for (int i = 0; i < 88200; ++i)
+            {
+                const double beatPhase = std::fmod (i / 22050.0, 1.0);
+                b.setSample (0, i, (float) (std::sin (i * 0.06) * std::exp (-beatPhase * 8.0)));
+            }
+            w->writeFromAudioSampleBuffer (b, 0, 88200);
+        }
+        edit->tempoSequence.getTempo (0)->setBpm (100.0);
+        arrangement->insertAudioFile (wav, 0, te::TimePosition());
+        arrangement->insertAudioFile (wav, 1, te::TimePosition());
+
+        if (auto* c0 = dynamic_cast<te::WaveAudioClip*> (te::getAudioTracks (*edit)[0]->getClips()[0]))
+        {
+            c0->setFadeIn (te::TimeDuration::fromSeconds (0.4));
+            c0->setFadeOut (te::TimeDuration::fromSeconds (0.6));
+            c0->setGainDB (-3.0f);
+            c0->state.setProperty ("arrColour", juce::Colour (0xffd8704f).toString(), nullptr);
+            c0->setName ("Fades + gain");
+        }
+        if (auto* c1 = dynamic_cast<te::WaveAudioClip*> (te::getAudioTracks (*edit)[1]->getClips()[0]))
+        {
+            arrangement->setClipWarpForDemo (*c1);
+            std::cout << "warp clip length " << c1->getPosition().getLength().inSeconds() << " speed " << c1->getSpeedRatio()
+                      << " bpm " << c1->getLoopInfo().getBpm (c1->getAudioFile().getInfo()) << std::endl;
+        }
+    }
+
     // --snapshot <file.png>: render the window to an image once thumbnails are ready, then quit.
     // Handy for visual checks and CI without touching the screen.
     const int snapIndex = args.indexOf ("--snapshot");
@@ -121,7 +158,7 @@ MainComponent::MainComponent()
     {
         const juce::File target (args[snapIndex + 1]);
 
-        juce::Timer::callAfterDelay (3000, [this, target]
+        juce::Timer::callAfterDelay (5000, [this, target]
         {
             target.deleteFile();
             juce::FileOutputStream out (target);

@@ -49,7 +49,7 @@ public:
     void filesDropped (const juce::StringArray&, int x, int y) override;
 
 private:
-    enum class DragMode { none, scrub, move, trimStart, trimEnd, automation, loopRange };
+    enum class DragMode { none, scrub, move, trimStart, trimEnd, automation, loopRange, fadeIn, fadeOut };
 
     struct ClipHit
     {
@@ -73,6 +73,13 @@ private:
     double barToBeat (int bar) const;
     int beatToBar (double beat) const;
     void showRulerMenu (const juce::MouseEvent&);
+    void showClipMenu (te::EditItemID);
+    void duplicateSelectedClip();
+    void setClipWarp (te::WaveAudioClip&, bool on);
+public:
+    void setClipWarpForDemo (te::WaveAudioClip& w) { setClipWarp (w, true); }
+private:
+    int fadeHandleX (te::WaveAudioClip&, bool fadeIn, juce::Rectangle<int> bounds) const;
 
     double getGridBeats() const;
     double snapBeat (double beat, bool bypass) const;
