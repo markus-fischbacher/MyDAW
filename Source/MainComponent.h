@@ -5,9 +5,11 @@
 #include "MixerView.h"
 #include "PianoRoll.h"
 #include "TransportBar.h"
+#include "BrowserPanel.h"
 
 // Owns the engine and the current project (te::Edit), and the File menu commands.
 class MainComponent : public juce::Component,
+                      public juce::DragAndDropContainer,
                       private juce::MenuBarModel,
                       private juce::Timer
 {
@@ -27,7 +29,7 @@ public:
 private:
     enum MenuIDs { newProject = 1, openProject, saveProject, saveProjectAs, importAudio, exportAudio, undo, redo,
                    addAudioTrack, addInstrumentTrack, addReturnTrack, deleteTrack, toggleAutomation,
-                   toggleMixer, toggleLoop, toggleClick, trackPlugins,
+                   toggleMixer, toggleBrowser, toggleLoop, toggleClick, trackPlugins,
                    insertTempo, resetTempoMap, setTimeSig, insertTimeSig, togglePunch, masterPlugins };
 
     // Project handling
@@ -35,6 +37,7 @@ private:
     void buildViews();
     void setPianoRollVisible (bool);
     void setMixerVisible (bool);
+    void setBrowserVisible (bool);
     void exportAudioFromChooser();
     void askForText (const juce::String& title, const juce::String& message, const juce::String& initial,
                      std::function<void (juce::String)> done);
@@ -64,6 +67,8 @@ private:
     std::unique_ptr<ArrangementView> arrangement;
     std::unique_ptr<PianoRoll> pianoRoll;
     std::unique_ptr<MixerView> mixer;
+    std::unique_ptr<BrowserPanel> browser;
+    bool browserVisible = false;
     bool mixerVisible = false;
     std::unique_ptr<juce::FileChooser> fileChooser;
     juce::String lastTitle;

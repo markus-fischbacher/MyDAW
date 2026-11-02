@@ -167,6 +167,7 @@ MainComponent::MainComponent()
         tracks[1]->getOutput().setOutputToTrack (tracks[2]);
         tracks[2]->setName ("Drum Bus");
         setMixerVisible (true);
+        setBrowserVisible (true);
     }
 
     // --snapshot <file.png>: render the window to an image once thumbnails are ready, then quit.
@@ -196,6 +197,7 @@ MainComponent::~MainComponent()
     edit->getTransport().stop (false, false);
     PluginUI::closeAllWindows();
     pianoRoll = nullptr;
+    browser = nullptr;
     mixer = nullptr;
     arrangement = nullptr;
     transportBar = nullptr;
@@ -211,6 +213,9 @@ void MainComponent::resized()
 {
     auto r = getLocalBounds();
     transportBar->setBounds (r.removeFromTop (44));
+
+    if (browser != nullptr && browser->isVisible())
+        browser->setBounds (r.removeFromLeft (260));
 
     if (mixer->isVisible())
         mixer->setBounds (r.removeFromBottom (juce::jmin (260, r.getHeight() / 2)));
@@ -263,6 +268,16 @@ void MainComponent::buildViews()
 
     pianoRoll = std::make_unique<PianoRoll> (*edit);
     mixer = std::make_unique<MixerView> (*edit);
+    browser = std::make_unique<BrowserPanel> (engine);
+    browser->onInsertFile = [this] (const juce::File& f)
+    {
+        int index = 0;
+        if (auto* t = arrangement->selectedTrack())
+            index = juce::jmax (0, te::getAudioTracks (*edit).indexOf (t));
+        arrangement->insertAudioFile (f, index, edit->getTransport().getPosition());
+    };
+    arrangement->getDraggedBrowserFile = [this] { return browser->getSelectedFile(); };
+    addChildComponent (*browser);
     transportBar->onToggleMixer = [this] { setMixerVisible (! mixerVisible); };
     arrangement->onOpenMidiClip = [this] (te::EditItemID id)
     {
@@ -276,6 +291,13 @@ void MainComponent::buildViews()
     addChildComponent (*mixer);
     mixer->setVisible (mixerVisible);
     transportBar->setMixerShown (mixerVisible);
+    resized();
+}
+
+void MainComponent::setBrowserVisible (bool shouldBeVisible)
+{
+    browserVisible = shouldBeVisible;
+    browser->setVisible (shouldBeVisible);
     resized();
 }
 
@@ -598,6 +620,7 @@ juce::PopupMenu MainComponent::getMenuForIndex (int index, const juce::String&)
     else
     {
         add (toggleMixer, "Show/Hide Mixer",   "cmd + M");
+        add (toggleBrowser, "Show/Hide Browser", "cmd + B");
         add (toggleLoop,  "Loop",              "cmd + L");
         add (toggleClick, "Metronome",         "cmd + K");
     }
@@ -621,6 +644,7 @@ void MainComponent::menuItemSelected (int id, int)
         case deleteTrack:    arrangement->deleteSelectedTrack(); break;
         case toggleAutomation: arrangement->toggleAutomationOnSelectedTrack(); break;
         case toggleMixer:    setMixerVisible (! mixerVisible); break;
+        case toggleBrowser:  setBrowserVisible (! browserVisible); break;
         case toggleLoop:
         {
             auto& t = edit->getTransport();
@@ -746,6 +770,7 @@ bool MainComponent::keyPressed (const juce::KeyPress& key)
         { { 't', cmd | shift, 0 }, addInstrumentTrack },
         { { 'a', cmd, 0 },         toggleAutomation },
         { { 'm', cmd, 0 },         toggleMixer },
+        { { 'b', cmd, 0 },         toggleBrowser },
         { { 'l', cmd, 0 },         toggleLoop },
         { { 'k', cmd, 0 },         toggleClick },
         { { 'p', cmd, 0 },         trackPlugins },

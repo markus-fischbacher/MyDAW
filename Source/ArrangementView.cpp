@@ -301,6 +301,7 @@ void ArrangementView::paintClip (juce::Graphics& g, te::Clip& clip, juce::Rectan
     if (waveClip != nullptr)
     {
         if (waveClip->getAutoTempo())            label << "  [warp]";
+        if (waveClip->hasAnyTakes())             label << "  [" << waveClip->getTakeDescriptions().size() << " takes]";
         if (waveClip->getIsReversed())           label << "  [rev]";
         if (waveClip->getTransposeSemiTones (false) != 0)
             label << "  " << juce::String::formatted ("%+d st", waveClip->getTransposeSemiTones (false));
@@ -1460,6 +1461,18 @@ void ArrangementView::showClipMenu (te::EditItemID id)
         m.addSubMenu ("Fade In", fadeInMenu);
         m.addSubMenu ("Fade Out", fadeOutMenu);
         m.addSeparator();
+        if (wave->hasAnyTakes())
+        {
+            juce::PopupMenu takes;
+            auto names = wave->getTakeDescriptions();
+            for (int i = 0; i < names.size(); ++i)
+                takes.addItem (600 + i, names[i], true, wave->getCurrentTake() == i);
+            takes.addSeparator();
+            takes.addItem (12, "Unpack Takes to New Tracks");
+            takes.addItem (13, "Delete Unused Takes");
+            m.addSubMenu ("Takes (" + juce::String (names.size()) + ")", takes);
+        }
+
         m.addItem (7, "Warp to Project Tempo", true, wave->getAutoTempo());
         m.addItem (8, "Detect Source Tempo");
         m.addSubMenu ("Transpose", transposeMenu);
@@ -1532,6 +1545,12 @@ void ArrangementView::showClipMenu (te::EditItemID id)
             {
                 w->performTempoDetect();
             }
+            else if (r >= 600 && r < 700)
+                w->setCurrentTake (r - 600);
+            else if (r == 12)
+                w->unpackTakes (true);
+            else if (r == 13)
+                w->deleteAllUnusedTakes (false);
             else if (r == 7)
             {
                 setClipWarp (*w, ! w->getAutoTempo());
@@ -1573,4 +1592,20 @@ void ArrangementView::setClipWarp (te::WaveAudioClip& w, bool on)
 
     if (on)
         w.setTimeStretchMode (te::TimeStretcher::soundtouchBetter);
+}
+
+bool ArrangementView::isInterestedInDragSource (const SourceDetails& d)
+{
+    return d.description.toString() == "BrowserFile";
+}
+
+void ArrangementView::itemDropped (const SourceDetails& d)
+{
+    if (! getDraggedBrowserFile)
+        return;
+
+    const auto file = getDraggedBrowserFile();
+    const auto p = d.localPosition;
+    const auto start = beatToTime (juce::jmax (0.0, snapBeat (xToBeat (juce::jmax (p.x, headerWidth)), false)));
+    insertAudioFile (file, juce::jmax (0, yToTrackIndex (p.y)), start);
 }

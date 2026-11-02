@@ -10,6 +10,7 @@
 */
 class ArrangementView : public juce::Component,
                         public juce::FileDragAndDropTarget,
+                        public juce::DragAndDropTarget,
                         private juce::ValueTree::Listener,
                         private juce::AsyncUpdater,
                         private juce::Timer
@@ -48,6 +49,10 @@ public:
 
     bool isInterestedInFileDrag (const juce::StringArray&) override;
     void filesDropped (const juce::StringArray&, int x, int y) override;
+
+    bool isInterestedInDragSource (const SourceDetails&) override;
+    void itemDropped (const SourceDetails&) override;
+    std::function<juce::File()> getDraggedBrowserFile;
 
 private:
     enum class DragMode { none, scrub, move, trimStart, trimEnd, automation, loopRange, fadeIn, fadeOut };
