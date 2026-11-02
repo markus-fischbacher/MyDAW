@@ -593,7 +593,8 @@ void ArrangementView::paintClip (juce::Graphics& g, te::Clip& clip, juce::Rectan
             auto body = b.withTrimmedTop (clipHeaderHeight).reduced (0, 2);
             g.setColour (juce::Colours::white.withAlpha (0.8f));
             g.setFont (juce::FontOptions (11.0f));
-            g.drawText ("rendering...", body, juce::Justification::centred);
+            auto msg = wave->getRenderMessage();
+            g.drawText (msg.isEmpty() ? juce::String ("rendering...") : msg, body, juce::Justification::centred);
             repaint (b);
         }
 
@@ -1140,7 +1141,7 @@ void ArrangementView::bounceToNewTrack (te::AudioTrack& src, te::TimeRange range
     edit.getTransport().stop (false, false);
 
     te::Renderer::Parameters p (edit);
-    p.destFile = edit.getTempDirectory (true).getNonexistentChildFile ("bounce", ".wav");
+    p.destFile = bounceDirectory().getNonexistentChildFile ("bounce", ".wav");
     p.audioFormat = edit.engine.getAudioFileFormatManager().getWavFormat();
     p.bitDepth = 24;
     p.time = { range.getStart(), range.getEnd() + te::TimeDuration::fromSeconds (1.5) };      // tail for reverbs/delays
@@ -1220,7 +1221,7 @@ void ArrangementView::consolidateClip (te::EditItemID id)
     const auto name = clip->getName();
 
     te::Renderer::Parameters p (edit);
-    p.destFile = edit.getTempDirectory (true).getNonexistentChildFile ("consolidated", ".wav");
+    p.destFile = bounceDirectory().getNonexistentChildFile ("consolidated", ".wav");
     p.audioFormat = edit.engine.getAudioFileFormatManager().getWavFormat();
     p.bitDepth = 24;
     p.time = range;
@@ -1860,8 +1861,39 @@ void ArrangementView::loadLayout()
             }
 }
 
+// Reverse / pitch / stretch swap a clip's source for a rendered proxy. If that render is lost (job cancelled by a quick
+// toggle, failed), the clip would sit at "rendering..." forever, so nudge the engine to start it again.
+void ArrangementView::kickStalledRenders()
+{
+    const auto now = juce::Time::getMillisecondCounter();
+
+    for (auto* track : te::getClipTracks (edit))
+        for (auto* clip : track->getClips())
+            if (auto* w = dynamic_cast<te::WaveAudioClip*> (clip))
+            {
+                auto it = renderWaitStart.find (w->itemID);
+
+                if (w->getAudioFile().getFile().existsAsFile())
+                {
+                    if (it != renderWaitStart.end())
+                        renderWaitStart.erase (it);
+                }
+                else if (it == renderWaitStart.end())
+                    renderWaitStart[w->itemID] = now;
+                else if (now - it->second > 4000)
+                {
+                    it->second = now;
+                    std::cerr << "KICK stalled render for " << w->getName() << std::endl;
+                    w->updateSourceFile();
+                }
+            }
+}
+
 void ArrangementView::timerCallback()
 {
+    if (++renderCheckTicks % 30 == 0)
+        kickStalledRenders();
+
     auto& transport = edit.getTransport();
     const int x = juce::roundToInt (timeToX (transport.getPosition()));
 

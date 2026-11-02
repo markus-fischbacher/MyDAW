@@ -173,7 +173,7 @@ MainComponent::MainComponent()
 
     // --demo-reverse / --demo-transpose: apply the clip-menu operation to the first clip of track 2 (use with --demo-freeze)
     if (args.contains ("--demo-reverse") || args.contains ("--demo-transpose") || args.contains ("--demo-warp")
-         || args.contains ("--demo-gain") || args.contains ("--demo-fades") || args.contains ("--demo-unreverse"))
+         || args.contains ("--demo-gain") || args.contains ("--demo-fades") || args.contains ("--demo-unreverse") || args.contains ("--demo-seq") || args.contains ("--demo-stress"))
         if (auto* w = dynamic_cast<te::WaveAudioClip*> (te::getAudioTracks (*edit)[1]->getClips().getFirst()))
         {
             if (args.contains ("--demo-reverse"))   w->setIsReversed (true);
@@ -190,6 +190,42 @@ MainComponent::MainComponent()
                                   << (int) cw->getAudioFile().getFile().existsAsFile() << std::endl;
                     }
                 });
+            }
+            if (args.contains ("--demo-seq"))            // user sequence: reverse, -12 st after 1 s, un-reverse after 2 s; log every 3 s
+            {
+                const auto id = w->itemID;
+                auto find = [this, id] { return dynamic_cast<te::WaveAudioClip*> (te::findClipForID (*edit, id)); };
+                w->setIsReversed (true);
+                juce::Timer::callAfterDelay (1000, [find] { if (auto* cw = find()) { cw->setPitchChange (-12.0f); cw->setTimeStretchMode (te::TimeStretcher::soundtouchBetter); } });
+                juce::Timer::callAfterDelay (2000, [find] { if (auto* cw = find()) cw->setIsReversed (false); });
+                for (int t = 3; t <= 18; t += 3)
+                    juce::Timer::callAfterDelay (t * 1000, [find, t]
+                    {
+                        if (auto* cw = find())
+                            std::cerr << "SEQ t=" << t << " src " << cw->getAudioFile().getFile().getFileName() << " exists " << (int) cw->getAudioFile().getFile().existsAsFile()
+                                      << " playback " << cw->getPlaybackFile().getFile().getFileName() << " exists " << (int) cw->getPlaybackFile().getFile().existsAsFile() << std::endl;
+                    });
+            }
+            if (args.contains ("--demo-stress"))         // rapid reverse / pitch toggling
+            {
+                const auto id = w->itemID;
+                auto find = [this, id] { return dynamic_cast<te::WaveAudioClip*> (te::findClipForID (*edit, id)); };
+                for (int i = 0; i < 12; ++i)
+                    juce::Timer::callAfterDelay (i * 350, [find, i]
+                    {
+                        if (auto* cw = find())
+                        {
+                            if (i % 3 == 0) cw->setIsReversed (! cw->getIsReversed());
+                            if (i % 4 == 1) { cw->setPitchChange (i % 8 == 1 ? -12.0f : 0.0f); cw->setTimeStretchMode (te::TimeStretcher::soundtouchBetter); }
+                        }
+                    });
+                for (int t = 6; t <= 24; t += 6)
+                    juce::Timer::callAfterDelay (t * 1000, [find, t]
+                    {
+                        if (auto* cw = find())
+                            std::cerr << "STRESS t=" << t << " rev " << (int) cw->getIsReversed() << " pitch " << cw->getPitchChange() << " src " << cw->getAudioFile().getFile().getFileName()
+                                      << " exists " << (int) cw->getAudioFile().getFile().existsAsFile() << std::endl;
+                    });
             }
             if (args.contains ("--demo-warp"))      arrangement->setClipWarpForDemo (*w);
             if (args.contains ("--demo-gain"))      w->setGainDB (6.0f);

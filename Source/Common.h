@@ -39,6 +39,15 @@ struct SyncUIBehaviour : public te::UIBehaviour
 
 /** Offline renders must not wait for background time-stretch proxies (they never finish while the message thread is
     busy rendering), so warped clips are rendered with the real-time stretcher instead. */
+/** Bounced / consolidated audio must not live in the engine's temp folder: the engine treats it as a cache
+    (files vanish while clips are reversed or stretched, and it is wiped between sessions, breaking saved projects). */
+inline juce::File bounceDirectory()
+{
+    auto d = juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory).getChildFile ("Arranger").getChildFile ("Bounces");
+    d.createDirectory();
+    return d;
+}
+
 struct ScopedNoProxies
 {
     explicit ScopedNoProxies (te::Edit& e)

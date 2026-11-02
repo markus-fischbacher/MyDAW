@@ -223,6 +223,9 @@ private:
     te::EditItemID renameTrackID;
     std::map<te::EditItemID, std::unique_ptr<te::SmartThumbnail>> thumbnails;
     std::map<te::EditItemID, juce::File> thumbnailFiles;
+    std::map<te::EditItemID, juce::uint32> renderWaitStart;
+    int renderCheckTicks = 0;
+    void kickStalledRenders();
 
     // Drag state
     DragMode dragMode = DragMode::none;
