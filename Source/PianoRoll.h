@@ -35,7 +35,7 @@ public:
 private:
     enum class DragMode { none, move, resize };
 
-    static constexpr int keyboardWidth = 64, titleHeight = 24, rowHeight = 16, numPitches = 128, edgeGrab = 6;
+    static constexpr int keyboardWidth = 64, titleHeight = 24, velHeight = 56, rowHeight = 16, numPitches = 128, edgeGrab = 6;
 
     te::MidiClip* getClip() const;
     double clipStartBeat (te::MidiClip&) const;
@@ -50,6 +50,11 @@ private:
     double snapBeat (double beat, bool bypass) const;
     te::MidiNote* hitTestNote (te::MidiClip&, juce::Point<int>, bool* onRightEdge) const;
     bool isLive (te::MidiClip&, const te::MidiNote*) const;
+    int gridBottom() const                      { return getHeight() - velHeight; }
+    te::MidiNote* hitTestVelocity (te::MidiClip&, juce::Point<int>) const;
+    void setVelocityFromY (te::MidiNote&, int y);
+    void quantiseNotes();
+    double beatsPerBar() const;
     void clampScroll();
     void scrollToNotes();
 
@@ -68,6 +73,7 @@ private:
     int scrollY = 0, lastPlayheadX = -1;
 
     te::MidiNote* selectedNote = nullptr;
+    te::MidiNote* velNote = nullptr;
     DragMode dragMode = DragMode::none;
     double dragStartBeat = 0.0, dragNoteStart = 0.0, dragNoteLength = 0.0;
 

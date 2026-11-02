@@ -62,14 +62,14 @@ void PianoRoll::scrollToNotes()
         }
     }
 
-    const int viewHeight = juce::jmax (100, getHeight() - titleHeight);
+    const int viewHeight = juce::jmax (100, getHeight() - titleHeight - velHeight);
     scrollY = (numPitches - 1 - centrePitch) * rowHeight - viewHeight / 2;
     clampScroll();
 }
 
 void PianoRoll::clampScroll()
 {
-    const int maxY = juce::jmax (0, numPitches * rowHeight - (getHeight() - titleHeight));
+    const int maxY = juce::jmax (0, numPitches * rowHeight - (getHeight() - titleHeight - velHeight));
     scrollY = juce::jlimit (0, maxY, scrollY);
     scrollBeats = juce::jmax (0.0, scrollBeats);
 }
@@ -139,7 +139,7 @@ void PianoRoll::paint (juce::Graphics& g)
         return;
     }
 
-    const auto grid = juce::Rectangle<int> (keyboardWidth, titleHeight, getWidth() - keyboardWidth, getHeight() - titleHeight);
+    const auto grid = juce::Rectangle<int> (keyboardWidth, titleHeight, getWidth() - keyboardWidth, getHeight() - titleHeight - velHeight);
 
     {
         juce::Graphics::ScopedSaveState s (g);
@@ -166,7 +166,7 @@ void PianoRoll::paint (juce::Graphics& g)
 
         for (auto b = first; b <= last; b += gridBeats)
         {
-            const bool isBar = std::fmod (b, 4.0) == 0.0, isBeat = std::fmod (b, 1.0) == 0.0;
+            const bool isBar = std::fmod (b, beatsPerBar()) == 0.0, isBeat = std::fmod (b, 1.0) == 0.0;
             g.setColour (isBar ? Palette::gridBar.brighter (0.3f) : isBeat ? Palette::gridBar : Palette::gridBeat);
             g.drawVerticalLine (juce::roundToInt (beatToX (b)), (float) grid.getY(), (float) grid.getBottom());
         }
@@ -210,14 +210,14 @@ void PianoRoll::paint (juce::Graphics& g)
     // Keyboard
     {
         juce::Graphics::ScopedSaveState s (g);
-        g.reduceClipRegion (juce::Rectangle<int> (0, titleHeight, keyboardWidth, getHeight() - titleHeight));
+        g.reduceClipRegion (juce::Rectangle<int> (0, titleHeight, keyboardWidth, getHeight() - titleHeight - velHeight));
         g.setFont (juce::FontOptions (10.0f));
 
         for (int p = 0; p < numPitches; ++p)
         {
             const int y = pitchToY (p);
 
-            if (y + rowHeight < titleHeight || y > getHeight())
+            if (y + rowHeight < titleHeight || y > gridBottom())
                 continue;
 
             g.setColour (isBlackKey (p) ? juce::Colour (0xff17181a) : juce::Colour (0xffd9dbe0));
@@ -231,6 +231,30 @@ void PianoRoll::paint (juce::Graphics& g)
         }
     }
 
+    // Velocity lane
+    {
+        const auto lane = juce::Rectangle<int> (0, gridBottom(), getWidth(), velHeight);
+        g.setColour (Palette::panel);
+        g.fillRect (lane);
+        g.setColour (Palette::gridBar);
+        g.drawHorizontalLine (lane.getY(), 0.0f, (float) getWidth());
+        g.setColour (Palette::textDim);
+        g.setFont (juce::FontOptions (10.0f));
+        g.drawText ("Velocity", 4, lane.getY(), keyboardWidth - 6, velHeight, juce::Justification::centredLeft, false);
+
+        juce::Graphics::ScopedSaveState s (g);
+        g.reduceClipRegion (lane.withTrimmedLeft (keyboardWidth));
+
+        for (auto* n : clip->getSequence().getNotes())
+        {
+            const auto x = (int) beatToX (n->getStartBeat().inBeats());
+            const auto h = juce::roundToInt ((velHeight - 6) * (float) n->getVelocity() / 127.0f);
+            g.setColour (n == selectedNote ? Palette::accent : Palette::midiClip);
+            g.fillRect (x, lane.getBottom() - 3 - h, 3, h);
+            g.fillEllipse ((float) x - 2.0f, (float) (lane.getBottom() - 3 - h) - 2.0f, 7.0f, 7.0f);
+        }
+    }
+
     // Title bar
     g.setColour (Palette::panel);
     g.fillRect (0, 0, getWidth(), titleHeight);
@@ -239,7 +263,7 @@ void PianoRoll::paint (juce::Graphics& g)
     g.drawText ("MIDI  -  " + clip->getName(), 10, 0, getWidth() / 2, titleHeight, juce::Justification::centredLeft, true);
     g.setColour (Palette::textDim);
     g.setFont (juce::FontOptions (11.0f));
-    g.drawText ("click: add note   right-click / delete: remove   alt: no snap   esc: close",
+    g.drawText ("click: add   right-click/delete: remove   Q: quantise   up/down: transpose   alt: no snap",
                 getWidth() / 2, 0, getWidth() / 2 - 10, titleHeight, juce::Justification::centredRight, true);
 }
 
@@ -255,8 +279,8 @@ void PianoRoll::timerCallback()
 
     if (x != lastPlayheadX)
     {
-        repaint (lastPlayheadX - 2, titleHeight, 5, getHeight());
-        repaint (x - 2, titleHeight, 5, getHeight());
+        repaint (lastPlayheadX - 2, titleHeight, 5, gridBottom() - titleHeight);
+        repaint (x - 2, titleHeight, 5, gridBottom() - titleHeight);
         lastPlayheadX = x;
     }
 }
@@ -278,6 +302,22 @@ void PianoRoll::mouseDown (const juce::MouseEvent& e)
 {
     dragMode = DragMode::none;
     auto* clip = getClip();
+    velNote = nullptr;
+
+    if (clip != nullptr && e.y >= gridBottom() && e.x >= keyboardWidth)
+    {
+        edit.getUndoManager().beginNewTransaction();
+        velNote = hitTestVelocity (*clip, e.getPosition());
+
+        if (velNote != nullptr)
+        {
+            selectedNote = velNote;
+            setVelocityFromY (*velNote, e.y);
+        }
+
+        repaint();
+        return;
+    }
 
     if (clip == nullptr || e.x < keyboardWidth || e.y < titleHeight)
         return;
@@ -330,6 +370,13 @@ void PianoRoll::mouseDrag (const juce::MouseEvent& e)
 {
     auto* clip = getClip();
 
+    if (clip != nullptr && velNote != nullptr)
+    {
+        if (isLive (*clip, velNote))
+            setVelocityFromY (*velNote, e.y);
+        return;
+    }
+
     if (clip == nullptr || dragMode == DragMode::none || ! isLive (*clip, selectedNote))
         return;
 
@@ -364,6 +411,7 @@ void PianoRoll::mouseUp (const juce::MouseEvent&)
         lastNoteLength = selectedNote->getLengthBeats().inBeats();
 
     dragMode = DragMode::none;
+    velNote = nullptr;
 }
 
 void PianoRoll::mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheelDetails& w)
@@ -397,9 +445,77 @@ void PianoRoll::mouseMagnify (const juce::MouseEvent& e, float scaleFactor)
     repaint();
 }
 
+te::MidiNote* PianoRoll::hitTestVelocity (te::MidiClip& clip, juce::Point<int> p) const
+{
+    te::MidiNote* best = nullptr;
+    double bestDist = 8.0;
+
+    for (auto* n : clip.getSequence().getNotes())
+    {
+        const auto d = std::abs (beatToX (n->getStartBeat().inBeats()) + 1.0 - p.x);
+
+        if (d <= bestDist)
+        {
+            bestDist = d;
+            best = n;
+        }
+    }
+
+    return best;
+}
+
+void PianoRoll::setVelocityFromY (te::MidiNote& n, int y)
+{
+    const auto norm = 1.0f - (float) (y - gridBottom() - 3) / (float) (velHeight - 6);
+    n.setVelocity (juce::jlimit (1, 127, juce::roundToInt (norm * 127.0f)), &edit.getUndoManager());
+    repaint();
+}
+
+double PianoRoll::beatsPerBar() const
+{
+    if (auto* clip = getClip())
+        return juce::jmax (1, edit.tempoSequence.getTimeSigAt (clip->getPosition().getStart()).numerator.get());
+
+    return 4.0;
+}
+
+void PianoRoll::quantiseNotes()
+{
+    auto* clip = getClip();
+
+    if (clip == nullptr)
+        return;
+
+    auto* um = &edit.getUndoManager();
+    um->beginNewTransaction();
+    const auto g = getGridBeats();
+
+    for (auto* n : clip->getSequence().getNotes())
+    {
+        const auto start = std::round (n->getStartBeat().inBeats() / g) * g;
+        n->setStartAndLength (te::BeatPosition::fromBeats (juce::jmax (0.0, start)), n->getLengthBeats(), um);
+    }
+
+    repaint();
+}
+
 bool PianoRoll::keyPressed (const juce::KeyPress& key)
 {
     auto* clip = getClip();
+
+    if (clip != nullptr && key == juce::KeyPress ('q'))
+    {
+        quantiseNotes();
+        return true;
+    }
+
+    if (clip != nullptr && isLive (*clip, selectedNote) && (key == juce::KeyPress::upKey || key == juce::KeyPress::downKey))
+    {
+        edit.getUndoManager().beginNewTransaction();
+        const int step = key == juce::KeyPress::upKey ? 1 : -1;
+        selectedNote->setNoteNumber (juce::jlimit (0, 127, selectedNote->getNoteNumber() + step), &edit.getUndoManager());
+        return true;
+    }
 
     if (clip != nullptr && isLive (*clip, selectedNote)
          && (key == juce::KeyPress::deleteKey || key == juce::KeyPress::backspaceKey))
