@@ -144,6 +144,8 @@ private:
 
     te::EditItemID selectedClipID, selectedTrackID;
     std::set<te::EditItemID> automationTracks;
+    std::map<te::EditItemID, std::pair<te::EditItemID, int>> pluginAutoParam;   // track -> (plugin, parameter index)
+    void showAutomationParamMenu (te::AudioTrack&);
     std::map<te::EditItemID, int> automationParam;      // 0 = volume (default), 1 = pan
     int dragAutoIndex = -1;
     double loopAnchorBeat = 0.0;

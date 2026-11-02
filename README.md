@@ -37,6 +37,13 @@ Optional args: a `.tracktionedit` project to open, audio files (placed on consec
 | Export (WAV/AIFF/FLAC/OGG, normalise, stems) | Shift+Cmd+E |
 | Zoom to fit | Shift+Cmd+F |
 | Recent projects / autosave recovery | File > Open Recent; autosaves every minute, File > Recover Autosave |
+| Sidechain | Track plug-ins menu > compressor > Sidechain Source |
+| MIDI CC / pitch-bend lanes | In the piano roll press C to cycle the lane (velocity, mod, volume, pan, expression, sustain, pitch bend); click adds/edits, Alt- or right-click deletes |
+| Import / export MIDI | File > Import MIDI File (or drop .mid on a lane); right-click a MIDI clip > Export MIDI File |
+| Crossfade | Right-click an audio clip > Crossfade into Next Clip |
+| Bounce / freeze | Right-click clip > Bounce to New Track; right-click track header > Freeze Track |
+| Automate any plug-in parameter | Show automation (A), then click the Vol/Pan/FX button to pick a parameter |
+| MP3 export | Shown in the export dialog when the `lame` encoder is installed (e.g. `brew install lame`) |
 | Scroll | Trackpad / wheel (Shift = horizontal) |
 | Locate | Click/drag in ruler |
 | Set loop range | Shift+drag in ruler; toggle with Loop button / Cmd+L |

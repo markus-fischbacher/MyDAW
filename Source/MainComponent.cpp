@@ -330,10 +330,34 @@ void MainComponent::askForText (const juce::String& title, const juce::String& m
     }), true);
 }
 
+static juce::File findLame()
+{
+    for (auto* path : { "/opt/homebrew/bin/lame", "/usr/local/bin/lame", "/usr/bin/lame" })
+        if (juce::File (path).existsAsFile())
+            return juce::File (path);
+
+    return {};
+}
+
+/** Encodes a rendered WAV to 320 kbps MP3 with the LAME command-line encoder, then deletes the WAV. */
+static juce::File encodeMp3 (const juce::File& lame, const juce::File& wav, const juce::File& mp3)
+{
+    mp3.deleteFile();
+    juce::ChildProcess p;
+    p.start (juce::StringArray { lame.getFullPathName(), "-b", "320", "--silent", wav.getFullPathName(), mp3.getFullPathName() });
+    p.waitForProcessToFinish (10 * 60 * 1000);
+    wav.deleteFile();
+    return mp3.existsAsFile() ? mp3 : juce::File();
+}
+
 void MainComponent::exportAudioFromChooser()
 {
+    const auto lame = findLame();
     auto* w = new juce::AlertWindow ("Export Audio", "Choose the format, loudness and what to render.", juce::MessageBoxIconType::NoIcon);
-    w->addComboBox ("fmt", { "WAV 16-bit", "WAV 24-bit", "AIFF 24-bit", "FLAC 24-bit", "OGG Vorbis" }, "Format");
+    juce::StringArray fmtNames { "WAV 16-bit", "WAV 24-bit", "AIFF 24-bit", "FLAC 24-bit", "OGG Vorbis" };
+    if (lame.existsAsFile())
+        fmtNames.add ("MP3 320 kbps");
+    w->addComboBox ("fmt", fmtNames, "Format");
     w->addComboBox ("norm", { "Off", "Peak -0.3 dB", "Loudness -14 LUFS", "Loudness -9 LUFS" }, "Normalise");
     w->addComboBox ("mode", { "Mixdown (one file)", "Stems (one file per track)" }, "Render");
     w->addComboBox ("sr", { "44.1 kHz", "48 kHz", "96 kHz" }, "Sample rate");
@@ -342,7 +366,7 @@ void MainComponent::exportAudioFromChooser()
     w->addButton ("Export...", 1, juce::KeyPress (juce::KeyPress::returnKey));
     w->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
 
-    w->enterModalState (true, juce::ModalCallbackFunction::create ([this, w] (int r)
+    w->enterModalState (true, juce::ModalCallbackFunction::create ([this, w, lame] (int r)
     {
         if (r != 1)
             return;
@@ -353,9 +377,23 @@ void MainComponent::exportAudioFromChooser()
         const double sr = std::array { 44100.0, 48000.0, 96000.0 }[(size_t) w->getComboBoxComponent ("sr")->getSelectedItemIndex()];
 
         auto& fm = engine.getAudioFileFormatManager();
-        juce::AudioFormat* format = fmt <= 1 ? fm.getWavFormat() : fmt == 2 ? fm.getAiffFormat() : fmt == 3 ? fm.getFlacFormat() : fm.getOggFormat();
+        const bool mp3 = fmt == 5;
+        juce::AudioFormat* format = (fmt <= 1 || mp3) ? fm.getWavFormat() : fmt == 2 ? fm.getAiffFormat() : fmt == 3 ? fm.getFlacFormat() : fm.getOggFormat();
         const int bits = fmt == 0 ? 16 : fmt == 4 ? 16 : 24;
-        const juce::String ext = fmt <= 1 ? "wav" : fmt == 2 ? "aiff" : fmt == 3 ? "flac" : "ogg";
+        const juce::String ext = mp3 ? "mp3" : fmt <= 1 ? "wav" : fmt == 2 ? "aiff" : fmt == 3 ? "flac" : "ogg";
+
+        // MP3: render to a temporary WAV beside the target, then encode
+        auto render = [lame, mp3] (const te::Renderer::Parameters& params) -> juce::File
+        {
+            if (! mp3)
+                return te::Renderer::renderToFile ("Export", params);
+
+            auto p2 = params;
+            const auto target = params.destFile;
+            p2.destFile = target.withFileExtension ("tmp.wav");
+            const auto wav = te::Renderer::renderToFile ("Export", p2);
+            return wav.existsAsFile() ? encodeMp3 (lame, wav, target) : juce::File();
+        };
 
         auto makeParams = [this, format, bits, sr, norm] (const juce::File& dest, int trackBit)
         {
@@ -388,14 +426,14 @@ void MainComponent::exportAudioFromChooser()
                                                                                     .getChildFile (getProjectName() + "." + ext), "*." + ext);
             fileChooser->launchAsync (juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::canSelectFiles
                                           | juce::FileBrowserComponent::warnAboutOverwriting,
-                                      [this, ext, makeParams] (const juce::FileChooser& fc)
+                                      [this, ext, makeParams, render] (const juce::FileChooser& fc)
                                       {
                                           auto f = fc.getResult();
                                           if (f == juce::File())
                                               return;
 
                                           f = f.withFileExtension (ext);
-                                          const auto out = te::Renderer::renderToFile ("Export", makeParams (f, -1));
+                                          const auto out = render (makeParams (f, -1));
                                           juce::AlertWindow::showMessageBoxAsync (out.existsAsFile() ? juce::MessageBoxIconType::InfoIcon
                                                                                                      : juce::MessageBoxIconType::WarningIcon,
                                                                                   "Export", out.existsAsFile() ? "Exported " + out.getFileName() : "Export failed.");
@@ -405,7 +443,7 @@ void MainComponent::exportAudioFromChooser()
         {
             fileChooser = std::make_unique<juce::FileChooser> ("Folder for stems", juce::File::getSpecialLocation (juce::File::userMusicDirectory));
             fileChooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectDirectories,
-                                      [this, ext, makeParams] (const juce::FileChooser& fc)
+                                      [this, ext, makeParams, render] (const juce::FileChooser& fc)
                                       {
                                           auto dir = fc.getResult();
                                           if (! dir.isDirectory())
@@ -420,7 +458,7 @@ void MainComponent::exportAudioFromChooser()
                                                   continue;
 
                                               auto name = juce::String (++done).paddedLeft ('0', 2) + " " + juce::File::createLegalFileName (t->getName()) + "." + ext;
-                                              if (te::Renderer::renderToFile ("Stem", makeParams (dir.getChildFile (name), i)).existsAsFile())
+                                              if (render (makeParams (dir.getChildFile (name), i)).existsAsFile())
                                                   continue;
                                               --done;
                                           }

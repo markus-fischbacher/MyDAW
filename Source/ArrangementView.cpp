@@ -505,7 +505,9 @@ void ArrangementView::paintHeaders (juce::Graphics& g)
         if (autoOn)
         {
             const bool pan = automationParam[t->itemID] == 1;
-            drawButton (HeaderButton::param, pan ? "Pan" : "Vol", true, Palette::accent.withAlpha (0.7f));
+            const bool fx = pluginAutoParam.count (t->itemID) > 0 && getAutoParam (*t) != nullptr
+                            && getAutoParam (*t) != (pan ? t->getVolumePlugin()->panParam.get() : t->getVolumePlugin()->volParam.get());
+            drawButton (HeaderButton::param, fx ? "FX" : pan ? "Pan" : "Vol", true, Palette::accent.withAlpha (0.7f));
         }
 
         g.setColour (Palette::background);
@@ -588,7 +590,7 @@ void ArrangementView::headerClicked (const juce::MouseEvent& e)
             if (automationTracks.erase (t->itemID) == 0)
                 automationTracks.insert (t->itemID);
             break;
-        case HeaderButton::param:       automationParam[t->itemID] = automationParam[t->itemID] == 1 ? 0 : 1; break;
+        case HeaderButton::param:       showAutomationParamMenu (*t); break;
         case HeaderButton::none:        break;
     }
 
@@ -860,11 +862,68 @@ void ArrangementView::toggleAutomationOnSelectedTrack()
 //==============================================================================
 // Automation
 
+void ArrangementView::showAutomationParamMenu (te::AudioTrack& t)
+{
+    juce::PopupMenu m;
+    m.addItem (1, "Volume");
+    m.addItem (2, "Pan");
+
+    auto targets = std::make_shared<std::vector<std::pair<te::EditItemID, int>>>();
+    constexpr int base = 100;
+
+    for (auto* plugin : t.pluginList)
+    {
+        if (dynamic_cast<te::VolumeAndPanPlugin*> (plugin) != nullptr || dynamic_cast<te::LevelMeterPlugin*> (plugin) != nullptr
+            || plugin->getAutomatableParameters().isEmpty())
+            continue;
+
+        juce::PopupMenu sub;
+        auto params = plugin->getAutomatableParameters();
+        for (int i = 0; i < juce::jmin (params.size(), 300); ++i)
+        {
+            sub.addItem (base + (int) targets->size(), params[i]->getParameterName());
+            targets->push_back ({ plugin->itemID, i });
+        }
+
+        if (sub.getNumItems() > 0)
+        {
+            if (m.getNumItems() == 2)
+                m.addSeparator();
+            m.addSubMenu (plugin->getName(), sub);
+        }
+    }
+
+    const auto id = t.itemID;
+    m.showMenuAsync ({}, [this, id, targets] (int r)
+    {
+        if (r == 0)
+            return;
+
+        pluginAutoParam.erase (id);
+
+        if (r == 1 || r == 2)
+            automationParam[id] = r - 1;
+        else if (r - base < (int) targets->size())
+            pluginAutoParam[id] = (*targets)[(size_t) (r - base)];
+
+        repaint();
+    });
+}
+
 te::AutomatableParameter* ArrangementView::getAutoParam (te::AudioTrack& t) const
 {
     auto* vp = t.getVolumePlugin();
     if (vp == nullptr)
         return nullptr;
+
+    if (auto sel = pluginAutoParam.find (t.itemID); sel != pluginAutoParam.end())
+        for (auto* plugin : t.pluginList)
+            if (plugin->itemID == sel->second.first)
+            {
+                auto params = plugin->getAutomatableParameters();
+                if (juce::isPositiveAndBelow (sel->second.second, params.size()))
+                    return params[sel->second.second];
+            }
 
     auto it = automationParam.find (t.itemID);
     return (it != automationParam.end() && it->second == 1) ? vp->panParam.get() : vp->volParam.get();
@@ -1747,7 +1806,7 @@ void ArrangementView::showClipMenu (te::EditItemID id)
         else if (r == 15)
         {
             if (auto* at = dynamic_cast<te::AudioTrack*> (c->getTrack()))
-                bounceToNewTrack (*at, c->getEditTimeRange(), c->getName(), [id] { /* muted below */ });
+                bounceToNewTrack (*at, c->getEditTimeRange(), c->getName(), {});
 
             if (auto* cc = te::findClipForID (edit, id))
                 cc->setMuted (true);

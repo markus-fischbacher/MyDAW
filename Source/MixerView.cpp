@@ -125,6 +125,10 @@ public:
             fader.setValue (volume->getSliderPos(), juce::dontSendNotification);
             pan.setValue (volume->getPan(), juce::dontSendNotification);
 
+            auto beginUndo = [this] { edit.getUndoManager().beginNewTransaction(); };
+            fader.onDragStart = beginUndo;
+            pan.onDragStart = beginUndo;
+            send.onDragStart = beginUndo;
             fader.onValueChange = [this] { volume->setSliderPos ((float) fader.getValue()); };
             pan.onValueChange   = [this] { volume->setPan ((float) pan.getValue()); };
         }
@@ -147,8 +151,8 @@ public:
             solo.setColour (juce::TextButton::buttonOnColourId, juce::Colour (0xff3a8fd0));
             mute.setToggleState (track->isMuted (false), juce::dontSendNotification);
             solo.setToggleState (track->isSolo (false), juce::dontSendNotification);
-            mute.onClick = [this] { track->setMute (mute.getToggleState()); };
-            solo.onClick = [this] { track->setSolo (solo.getToggleState()); };
+            mute.onClick = [this] { edit.getUndoManager().beginNewTransaction(); track->setMute (mute.getToggleState()); };
+            solo.onClick = [this] { edit.getUndoManager().beginNewTransaction(); track->setSolo (solo.getToggleState()); };
         }
 
         if (meter != nullptr)
