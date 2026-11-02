@@ -54,6 +54,12 @@ private:
     te::MidiNote* hitTestVelocity (te::MidiClip&, juce::Point<int>) const;
     void setVelocityFromY (te::MidiNote&, int y);
     void quantiseNotes();
+    int ccMax() const                           { return ccType == te::MidiControllerEvent::pitchWheelType ? 16383 : 127; }
+    juce::String laneName() const;
+    te::MidiControllerEvent* hitTestCC (te::MidiClip&, juce::Point<int>) const;
+    int ccValueFromY (int y) const;
+    int ccType = -1;                            // -1 = note velocity, otherwise a controller number
+    te::MidiControllerEvent* ccDrag = nullptr;
     double beatsPerBar() const;
     void clampScroll();
     void scrollToNotes();

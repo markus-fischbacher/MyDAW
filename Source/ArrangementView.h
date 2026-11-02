@@ -24,6 +24,8 @@ public:
     /** Appends a track; instrument tracks get a synth so MIDI clips are audible. */
     void addTrack (bool instrument);
     void addReturnTrack();
+    void importMidiFile (const juce::File&, int trackIndex, te::TimePosition start);
+    void exportMidiClip (te::MidiClip&);
     void zoomToFit();
     void deleteSelectedTrack();
     bool hasSelectedTrack() const           { return getSelectedTrack() != nullptr; }
@@ -145,6 +147,7 @@ private:
     double loopAnchorBeat = 0.0;
     te::EditItemID dragAutoTrack;
     juce::TextEditor renameEditor;
+    std::unique_ptr<juce::FileChooser> chooser;
     te::EditItemID renameTrackID;
     std::map<te::EditItemID, std::unique_ptr<te::SmartThumbnail>> thumbnails;
 

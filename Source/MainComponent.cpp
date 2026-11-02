@@ -732,6 +732,7 @@ juce::PopupMenu MainComponent::getMenuForIndex (int index, const juce::String&)
         add (saveProjectAs, "Save As...",        "shift + cmd + S");
         m.addSeparator();
         add (importAudio,   "Import Audio...",   "cmd + I");
+        add (importMidi,    "Import MIDI File...", "");
         add (exportAudio,   "Export Audio...",   "shift + cmd + E");
     }
     else if (index == 1)
@@ -788,6 +789,20 @@ void MainComponent::menuItemSelected (int id, int)
         case saveProject:    saveCurrentProject(); break;
         case saveProjectAs:  saveProjectAsFromChooser(); break;
         case importAudio:    addAudioFileFromChooser(); break;
+        case importMidi:
+            fileChooser = std::make_unique<juce::FileChooser> ("Import MIDI", juce::File::getSpecialLocation (juce::File::userMusicDirectory), "*.mid;*.midi");
+            fileChooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
+                                      [this] (const juce::FileChooser& fc)
+                                      {
+                                          if (! fc.getResult().existsAsFile())
+                                              return;
+                                          auto* t = arrangement->selectedTrack();
+                                          const auto tracks = te::getAudioTracks (*edit);
+                                          const int idx = t != nullptr ? tracks.indexOf (t) : 0;
+                                          arrangement->importMidiFile (fc.getResult(), juce::jmax (0, idx),
+                                                                       edit->getTransport().getPosition());
+                                      });
+            break;
         case exportAudio:    exportAudioFromChooser(); break;
         case addAudioTrack:  arrangement->addTrack (false); break;
         case addInstrumentTrack: arrangement->addTrack (true); break;

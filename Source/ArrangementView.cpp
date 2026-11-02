@@ -1334,7 +1334,8 @@ bool ArrangementView::isInterestedInFileDrag (const juce::StringArray& files)
     auto& formats = edit.engine.getAudioFileFormatManager().readFormatManager;
 
     for (auto& f : files)
-        if (formats.findFormatForFileExtension (juce::File (f).getFileExtension()) != nullptr)
+        if (formats.findFormatForFileExtension (juce::File (f).getFileExtension()) != nullptr
+            || juce::File (f).hasFileExtension ("mid;midi"))
             return true;
 
     return false;
@@ -1347,7 +1348,133 @@ void ArrangementView::filesDropped (const juce::StringArray& files, int x, int y
 
     // Multiple files go onto consecutive tracks
     for (auto& f : files)
-        insertAudioFile (juce::File (f), trackIndex++, start);
+    {
+        if (juce::File (f).hasFileExtension ("mid;midi"))
+            importMidiFile (juce::File (f), trackIndex++, start);
+        else
+            insertAudioFile (juce::File (f), trackIndex++, start);
+    }
+}
+
+void ArrangementView::importMidiFile (const juce::File& file, int trackIndex, te::TimePosition start)
+{
+    juce::FileInputStream in (file);
+    juce::MidiFile mf;
+
+    if (! in.openedOk() || ! mf.readFrom (in) || mf.getTimeFormat() <= 0)
+        return;
+
+    const double ppq = mf.getTimeFormat();
+    double endBeat = 0.0;
+
+    struct Note { int pitch, vel; double start, len; };
+    struct CC { int type, value; double at; };
+    std::vector<Note> notes;
+    std::vector<CC> ccs;
+
+    for (int t = 0; t < mf.getNumTracks(); ++t)
+    {
+        juce::MidiMessageSequence seq (*mf.getTrack (t));
+        seq.updateMatchedPairs();
+
+        for (auto* ev : seq)
+        {
+            const auto& m = ev->message;
+            const double at = m.getTimeStamp() / ppq;
+
+            if (m.isNoteOn() && ev->noteOffObject != nullptr)
+            {
+                const double len = juce::jmax (0.0625, ev->noteOffObject->message.getTimeStamp() / ppq - at);
+                notes.push_back ({ m.getNoteNumber(), m.getVelocity(), at, len });
+                endBeat = std::max (endBeat, at + len);
+            }
+            else if (m.isController())
+                ccs.push_back ({ m.getControllerNumber(), m.getControllerValue(), at });
+            else if (m.isPitchWheel())
+                ccs.push_back ({ te::MidiControllerEvent::pitchWheelType, m.getPitchWheelValue(), at });
+        }
+    }
+
+    if (notes.empty() && ccs.empty())
+        return;
+
+    const double bar = beatsPerBar();
+    endBeat = std::ceil (juce::jmax (endBeat, 1.0) / bar) * bar;
+
+    edit.ensureNumberOfAudioTracks (trackIndex + 1);
+    auto* track = te::getAudioTracks (edit)[trackIndex];
+    edit.getUndoManager().beginNewTransaction();
+
+    const auto startBeat = edit.tempoSequence.toBeats (start);
+    const te::TimeRange range { start, edit.tempoSequence.toTime (startBeat + te::BeatDuration::fromBeats (endBeat)) };
+
+    if (auto clip = track->insertMIDIClip (file.getFileNameWithoutExtension(), range, nullptr))
+    {
+        auto* um = &edit.getUndoManager();
+
+        for (auto& n : notes)
+            clip->getSequence().addNote (n.pitch, te::BeatPosition::fromBeats (n.start), te::BeatDuration::fromBeats (n.len), n.vel, 0, um);
+
+        for (auto& c2 : ccs)
+            clip->getSequence().addControllerEvent (te::BeatPosition::fromBeats (c2.at), c2.type, c2.value, um);
+
+        selectedClipID = clip->itemID;
+    }
+
+    repaint();
+}
+
+void ArrangementView::exportMidiClip (te::MidiClip& clip)
+{
+    chooser = std::make_unique<juce::FileChooser> ("Export MIDI", juce::File::getSpecialLocation (juce::File::userMusicDirectory)
+                                                                       .getChildFile (clip.getName() + ".mid"), "*.mid");
+    const auto id = clip.itemID;
+
+    chooser->launchAsync (juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::canSelectFiles
+                              | juce::FileBrowserComponent::warnAboutOverwriting,
+                          [this, id] (const juce::FileChooser& fc)
+                          {
+                              auto* mc = dynamic_cast<te::MidiClip*> (te::findClipForID (edit, id));
+                              auto f = fc.getResult();
+
+                              if (mc == nullptr || f == juce::File())
+                                  return;
+
+                              constexpr int ppq = 960;
+                              juce::MidiMessageSequence seq;
+                              const auto bpm = edit.tempoSequence.getTempoAt (mc->getPosition().getStart()).getBpm();
+                              seq.addEvent (juce::MidiMessage::tempoMetaEvent (juce::roundToInt (60000000.0 / bpm)), 0.0);
+
+                              for (auto* n : mc->getSequence().getNotes())
+                              {
+                                  const double s = n->getStartBeat().inBeats() * ppq, e = s + n->getLengthBeats().inBeats() * ppq;
+                                  seq.addEvent (juce::MidiMessage::noteOn (1, n->getNoteNumber(), (juce::uint8) n->getVelocity()), s);
+                                  seq.addEvent (juce::MidiMessage::noteOff (1, n->getNoteNumber()), e);
+                              }
+
+                              for (auto* ev : mc->getSequence().getControllerEvents())
+                              {
+                                  const double at = ev->getBeatPosition().inBeats() * ppq;
+
+                                  if (ev->getType() == te::MidiControllerEvent::pitchWheelType)
+                                      seq.addEvent (juce::MidiMessage::pitchWheel (1, ev->getControllerValue()), at);
+                                  else if (ev->getType() < 128)
+                                      seq.addEvent (juce::MidiMessage::controllerEvent (1, ev->getType(), ev->getControllerValue()), at);
+                              }
+
+                              seq.sort();
+                              seq.updateMatchedPairs();
+
+                              juce::MidiFile mf;
+                              mf.setTicksPerQuarterNote (ppq);
+                              mf.addTrack (seq);
+
+                              f = f.withFileExtension ("mid");
+                              f.deleteFile();
+                              juce::FileOutputStream out (f);
+                              if (out.openedOk())
+                                  mf.writeTo (out);
+                          });
 }
 
 void ArrangementView::insertAudioFile (const juce::File& file, int trackIndex, te::TimePosition start)
@@ -1496,6 +1623,7 @@ void ArrangementView::showClipMenu (te::EditItemID id)
     {
         m.addSeparator();
         m.addItem (9, "Edit in Piano Roll");
+        m.addItem (14, "Export MIDI File...");
     }
 
     m.showMenuAsync ({}, [this, id] (int r)
@@ -1527,6 +1655,7 @@ void ArrangementView::showClipMenu (te::EditItemID id)
                 if (c->getPosition().time.containsInclusive (t))
                     track->splitClip (*c, t);
         }
+        else if (r == 14) { if (auto* mc = dynamic_cast<te::MidiClip*> (c)) exportMidiClip (*mc); }
         else if (r == 3)  duplicateSelectedClip();
         else if (r == 4)  { c->removeFromParent(); selectedClipID = {}; }
         else if (r == 9 && onOpenMidiClip) onOpenMidiClip (id);

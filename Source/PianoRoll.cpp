@@ -240,10 +240,26 @@ void PianoRoll::paint (juce::Graphics& g)
         g.drawHorizontalLine (lane.getY(), 0.0f, (float) getWidth());
         g.setColour (Palette::textDim);
         g.setFont (juce::FontOptions (10.0f));
-        g.drawText ("Velocity", 4, lane.getY(), keyboardWidth - 6, velHeight, juce::Justification::centredLeft, false);
+        g.drawText (laneName() + " (C)", 4, lane.getY(), keyboardWidth - 6, velHeight, juce::Justification::centredLeft, false);
 
         juce::Graphics::ScopedSaveState s (g);
         g.reduceClipRegion (lane.withTrimmedLeft (keyboardWidth));
+
+        if (ccType >= 0)
+        {
+            for (auto* ev : clip->getSequence().getControllerEvents())
+            {
+                if (ev->getType() != ccType)
+                    continue;
+
+                const auto x = (int) beatToX (ev->getBeatPosition().inBeats());
+                const auto h = juce::roundToInt ((velHeight - 6) * (float) ev->getControllerValue() / (float) ccMax());
+                g.setColour (ev == ccDrag ? Palette::accent : Palette::midiClip);
+                g.fillRect (x, lane.getBottom() - 3 - h, 2, h);
+                g.fillEllipse ((float) x - 2.0f, (float) (lane.getBottom() - 3 - h) - 2.0f, 6.0f, 6.0f);
+            }
+            return;
+        }
 
         for (auto* n : clip->getSequence().getNotes())
         {
@@ -303,6 +319,34 @@ void PianoRoll::mouseDown (const juce::MouseEvent& e)
     dragMode = DragMode::none;
     auto* clip = getClip();
     velNote = nullptr;
+
+    ccDrag = nullptr;
+
+    if (clip != nullptr && ccType >= 0 && e.y >= gridBottom() && e.x >= keyboardWidth)
+    {
+        auto* um = &edit.getUndoManager();
+        um->beginNewTransaction();
+        auto* hit = hitTestCC (*clip, e.getPosition());
+
+        if (e.mods.isPopupMenu() || e.mods.isAltDown())
+        {
+            if (hit != nullptr)
+                clip->getSequence().removeControllerEvent (*hit, um);
+        }
+        else
+        {
+            if (hit == nullptr)
+                hit = clip->getSequence().addControllerEvent (te::BeatPosition::fromBeats (juce::jmax (0.0, snapBeat (xToBeat (e.x), false))),
+                                                              ccType, ccValueFromY (e.y), um);
+            else
+                hit->setControllerValue (ccValueFromY (e.y), um);
+
+            ccDrag = hit;
+        }
+
+        repaint();
+        return;
+    }
 
     if (clip != nullptr && e.y >= gridBottom() && e.x >= keyboardWidth)
     {
@@ -370,6 +414,12 @@ void PianoRoll::mouseDrag (const juce::MouseEvent& e)
 {
     auto* clip = getClip();
 
+    if (clip != nullptr && ccDrag != nullptr)
+    {
+        ccDrag->setControllerValue (ccValueFromY (e.y), &edit.getUndoManager());
+        return;
+    }
+
     if (clip != nullptr && velNote != nullptr)
     {
         if (isLive (*clip, velNote))
@@ -412,6 +462,34 @@ void PianoRoll::mouseUp (const juce::MouseEvent&)
 
     dragMode = DragMode::none;
     velNote = nullptr;
+    ccDrag = nullptr;
+}
+
+juce::String PianoRoll::laneName() const
+{
+    if (ccType < 0)                                         return "Velocity";
+    if (ccType == te::MidiControllerEvent::pitchWheelType)  return "Pitch bend";
+    if (ccType == 1)  return "Mod wheel";
+    if (ccType == 7)  return "Volume";
+    if (ccType == 10) return "Pan";
+    if (ccType == 11) return "Expression";
+    if (ccType == 64) return "Sustain";
+    return "CC " + juce::String (ccType);
+}
+
+int PianoRoll::ccValueFromY (int y) const
+{
+    const auto norm = 1.0f - (float) (y - gridBottom() - 3) / (float) (velHeight - 6);
+    return juce::roundToInt (juce::jlimit (0.0f, 1.0f, norm) * (float) ccMax());
+}
+
+te::MidiControllerEvent* PianoRoll::hitTestCC (te::MidiClip& clip, juce::Point<int> p) const
+{
+    for (auto* ev : clip.getSequence().getControllerEvents())
+        if (ev->getType() == ccType && std::abs (beatToX (ev->getBeatPosition().inBeats()) - p.x) <= 5.0)
+            return ev;
+
+    return nullptr;
 }
 
 void PianoRoll::mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheelDetails& w)
@@ -501,6 +579,17 @@ void PianoRoll::quantiseNotes()
 
 bool PianoRoll::keyPressed (const juce::KeyPress& key)
 {
+    if (key == juce::KeyPress ('c', 0, 0))
+    {
+        static const int lanes[] = { -1, 1, 7, 10, 11, 64, te::MidiControllerEvent::pitchWheelType };
+        size_t i = 0;
+        while (i < std::size (lanes) && lanes[i] != ccType)
+            ++i;
+        ccType = lanes[(i + 1) % std::size (lanes)];
+        repaint();
+        return true;
+    }
+
     auto* clip = getClip();
 
     if (clip != nullptr && key == juce::KeyPress ('q'))

@@ -233,7 +233,8 @@ namespace PluginUI
             if (! isChainBasics (p))
                 chain->add (p);
 
-        constexpr int openBase = 100, bypassBase = 200, removeBase = 300, builtinBase = 400, externalBase = 1000, scanID = 1;
+        constexpr int openBase = 100, bypassBase = 200, removeBase = 300, builtinBase = 400, sidechainBase = 100000, externalBase = 1000, scanID = 1;
+        auto scNames = std::make_shared<juce::Array<juce::StringArray>>();
         juce::PopupMenu menu;
 
         for (int i = 0; i < chain->size(); ++i)
@@ -243,6 +244,15 @@ namespace PluginUI
             sub.addItem (openBase + i, "Open Editor");
             sub.addItem (bypassBase + i, "Bypass", true, ! p->isEnabled());
             sub.addItem (removeBase + i, "Remove");
+            scNames->add (p->canSidechain() ? p->getSidechainSourceNames (true) : juce::StringArray());
+            if (! scNames->getReference (i).isEmpty())
+            {
+                juce::PopupMenu sc;
+                const auto current = p->getSidechainSourceName();
+                for (int s = 0; s < scNames->getReference (i).size(); ++s)
+                    sc.addItem (sidechainBase + i * 20 + s, scNames->getReference (i)[s], true, scNames->getReference (i)[s] == current);
+                sub.addSubMenu ("Sidechain Source", sc);
+            }
             menu.addSubMenu (p->getName(), sub);
         }
 
@@ -266,7 +276,7 @@ namespace PluginUI
         menu.addSeparator();
         menu.addItem (scanID, "Scan for Plug-ins (AU / VST3)...");
 
-        menu.showMenuAsync ({}, [&engine, &edit, &list, chain, types, builtins = builtins] (int r)
+        menu.showMenuAsync ({}, [&engine, &edit, &list, chain, scNames, types, builtins = builtins] (int r)
         {
             if (r == 0)
                 return;
@@ -282,6 +292,7 @@ namespace PluginUI
             };
 
             if (r == scanID)                         Scanner::start (engine);
+            else if (r >= sidechainBase)             chain->getUnchecked ((r - sidechainBase) / 20)->setSidechainSourceByName (scNames->getReference ((r - sidechainBase) / 20)[(r - sidechainBase) % 20]);
             else if (r >= externalBase)
             {
                 auto& d = types.getReference (r - externalBase);
