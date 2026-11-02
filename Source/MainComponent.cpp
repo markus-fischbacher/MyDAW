@@ -432,6 +432,31 @@ void MainComponent::buildViews()
     };
 
     arrangement = std::make_unique<ArrangementView> (*edit);
+    arrangement->getAudioFolder = [this]
+    {
+        return projectFile == juce::File() ? juce::File() : projectFile.getSiblingFile (projectFile.getFileNameWithoutExtension() + " Audio");
+    };
+    arrangement->requestProject = [this] (std::function<void (ArrangementView&)> action)
+    {
+        if (projectFile != juce::File())
+        {
+            action (*arrangement);
+            return;
+        }
+
+        juce::AlertWindow::showAsync (juce::MessageBoxOptions()
+                                          .withIconType (juce::MessageBoxIconType::QuestionIcon)
+                                          .withTitle ("Save project first")
+                                          .withMessage ("Bounced audio is stored in the project's audio folder next to the project file. Save the project now?")
+                                          .withButton ("Save...", 1)
+                                          .withButton ("Cancel", 0)
+                                          .withAssociatedComponent (this),
+                                      [this, action] (int r)
+                                      {
+                                          if (r == 1)
+                                              saveCurrentProject ([this, action] (bool ok) { if (ok && arrangement != nullptr) action (*arrangement); });
+                                      });
+    };
 
     pianoRoll = std::make_unique<PianoRoll> (*edit);
     mixer = std::make_unique<MixerView> (*edit);

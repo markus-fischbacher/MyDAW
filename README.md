@@ -55,6 +55,7 @@ Optional args: a `.tracktionedit` project to open, audio files (placed on consec
 | Select several clips | Drag a rectangle in empty space, or Shift/Cmd-click; drag one to move all, Delete removes all |
 | Select all / copy / cut / paste clips | Cmd+A, Cmd+C, Cmd+X, Cmd+V (pastes at the playhead); Cmd+D duplicates the selection |
 | Recording latency offset | Audio Settings dialog, slider at the bottom |
+| Bounce / consolidate files | Stored in `<project name> Audio/` next to the project file; an untitled project asks to be saved first |
 | Lane layout | Lane heights, collapsed lanes and take lanes are saved with the project |
 | Consolidate clip | Clip right-click menu: Consolidate in Place renders the clip with its effects (turn Warp off first) |
 | Move tempo / time-sig markers | Drag a marker in the ruler (time signatures snap to bars) |

@@ -947,15 +947,18 @@ void ArrangementView::showTrackMenu (int trackIndex)
             case 4: deleteSelectedTrack(); break;
             case 5:
                 if (auto* t = te::getAudioTracks (edit)[trackIndex])
-                {
-                    const auto len = edit.getLength();
-                    if (len.inSeconds() > 0.0)
-                        bounceToNewTrack (*t, { te::TimePosition(), te::TimePosition() + len }, t->getName(), [id = t->itemID, this]
-                        {
-                            if (auto* orig = dynamic_cast<te::AudioTrack*> (findTrackForID (edit, id)))
-                                orig->setMute (true);
-                        });
-                }
+                    withProject ([tid = t->itemID] (ArrangementView& v)
+                    {
+                        auto* tr = dynamic_cast<te::AudioTrack*> (te::findTrackForID (v.edit, tid));
+                        const auto len = v.edit.getLength();
+
+                        if (tr != nullptr && len.inSeconds() > 0.0)
+                            v.bounceToNewTrack (*tr, { te::TimePosition(), te::TimePosition() + len }, tr->getName(), [tid, &v]
+                            {
+                                if (auto* orig = dynamic_cast<te::AudioTrack*> (te::findTrackForID (v.edit, tid)))
+                                    orig->setMute (true);
+                            });
+                    });
                 break;
             case 6:
                 if (auto* t = te::getAudioTracks (edit)[trackIndex])
@@ -1141,7 +1144,7 @@ void ArrangementView::bounceToNewTrack (te::AudioTrack& src, te::TimeRange range
     edit.getTransport().stop (false, false);
 
     te::Renderer::Parameters p (edit);
-    p.destFile = bounceDirectory().getNonexistentChildFile ("bounce", ".wav");
+    p.destFile = audioDir().getNonexistentChildFile ("bounce", ".wav");
     p.audioFormat = edit.engine.getAudioFileFormatManager().getWavFormat();
     p.bitDepth = 24;
     p.time = { range.getStart(), range.getEnd() + te::TimeDuration::fromSeconds (1.5) };      // tail for reverbs/delays
@@ -1221,7 +1224,7 @@ void ArrangementView::consolidateClip (te::EditItemID id)
     const auto name = clip->getName();
 
     te::Renderer::Parameters p (edit);
-    p.destFile = bounceDirectory().getNonexistentChildFile ("consolidated", ".wav");
+    p.destFile = audioDir().getNonexistentChildFile ("consolidated", ".wav");
     p.audioFormat = edit.engine.getAudioFileFormatManager().getWavFormat();
     p.bitDepth = 24;
     p.time = range;
@@ -3143,15 +3146,18 @@ void ArrangementView::showClipMenu (te::EditItemID id)
                     track->splitClip (*c, t);
         }
         else if (r == 16)
-            consolidateClip (id);
+            withProject ([id] (ArrangementView& v) { v.consolidateClip (id); });
         else if (r == 15)
-        {
-            if (auto* at = dynamic_cast<te::AudioTrack*> (c->getTrack()))
-                bounceToNewTrack (*at, c->getEditTimeRange(), c->getName(), {}, c);
+            withProject ([id] (ArrangementView& v)
+            {
+                auto* cl = te::findClipForID (v.edit, id);
 
-            if (auto* cc = te::findClipForID (edit, id))
-                cc->setMuted (true);
-        }
+                if (auto* at = cl != nullptr ? dynamic_cast<te::AudioTrack*> (cl->getTrack()) : nullptr)
+                    v.bounceToNewTrack (*at, cl->getEditTimeRange(), cl->getName(), {}, cl);
+
+                if (auto* cc = te::findClipForID (v.edit, id))
+                    cc->setMuted (true);
+            });
         else if (r == 16) crossfadeIntoNext (*c);
         else if (r == 14) { if (auto* mc = dynamic_cast<te::MidiClip*> (c)) exportMidiClip (*mc); }
         else if (r == 3)  duplicateSelectedClip();

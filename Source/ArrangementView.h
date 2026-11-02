@@ -43,6 +43,20 @@ public:
     /** Called when a MIDI clip should be opened for editing (double-click, or just created). */
     std::function<void (te::EditItemID)> onOpenMidiClip;
 
+    /** Generated audio (bounce, consolidate) lives in the project's audio folder. requestProject runs the action once the
+        project has been saved (it may rebuild this view when saving an untitled project, so the action gets the live view). */
+    std::function<void (std::function<void (ArrangementView&)>)> requestProject;
+    std::function<juce::File()> getAudioFolder;
+    void withProject (std::function<void (ArrangementView&)> a)  { if (requestProject) requestProject (std::move (a)); else a (*this); }
+    juce::File audioDir() const
+    {
+        auto f = getAudioFolder ? getAudioFolder() : juce::File();
+        if (f == juce::File())
+            f = bounceDirectory();
+        f.createDirectory();
+        return f;
+    }
+
     void paint (juce::Graphics&) override;
     bool keyPressed (const juce::KeyPress&) override;
 
