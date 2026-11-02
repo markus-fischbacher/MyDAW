@@ -1169,8 +1169,35 @@ void ArrangementView::bounceToNewTrack (te::AudioTrack& src, te::TimeRange range
     if (auto t = edit.insertNewAudioTrack (te::TrackInsertPoint (nullptr, &src), nullptr))
     {
         t->setName (name + " (bounce)");
+        // The render has a 1.5 s tail for reverbs/delays; only keep as much of it as is actually audible (> -60 dB)
+        double length = range.getLength().inSeconds();
         te::AudioFile af (edit.engine, out);
-        t->insertWaveClip (name, out, { { range.getStart(), te::TimeDuration::fromSeconds (af.getLength()) }, {} }, false);
+        juce::AudioFormatManager fm;
+        fm.registerBasicFormats();
+
+        if (auto reader = std::unique_ptr<juce::AudioFormatReader> (fm.createReaderFor (out)))
+        {
+            const auto total = reader->lengthInSamples;
+            const auto from = juce::jmin (total, (juce::int64) (length * reader->sampleRate));
+            juce::AudioBuffer<float> buf ((int) reader->numChannels, (int) (total - from));
+
+            if (buf.getNumSamples() > 0 && reader->read (&buf, 0, buf.getNumSamples(), from, true, true))
+                for (int i = buf.getNumSamples() - 1; i >= 0; --i)
+                {
+                    bool loud = false;
+                    for (int ch = 0; ch < buf.getNumChannels() && ! loud; ++ch)
+                        loud = std::abs (buf.getSample (ch, i)) > 0.001f;
+
+                    if (loud)
+                    {
+                        length += (i + 1) / reader->sampleRate;
+                        break;
+                    }
+                }
+        }
+
+        length = juce::jmin (length, af.getLength());
+        t->insertWaveClip (name, out, { { range.getStart(), te::TimeDuration::fromSeconds (length) }, {} }, false);
         selectedTrackID = t->itemID;
     }
 
